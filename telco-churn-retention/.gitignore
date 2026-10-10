@@ -1,0 +1,40 @@
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# --- Ambientes virtuais ---------------------------------------------------
+.venv/
+venv/
+env/
+.env
+
+# --- Jupyter --------------------------------------------------------------
+.ipynb_checkpoints/
+notebooks/*executed*.ipynb
+
+# --- Dados e artefactos gerados (regeneráveis com o notebook/script) -----
+data/processed/*
+!data/processed/.gitkeep
+outputs/figures/*
+!outputs/figures/.gitkeep
+outputs/tables/*
+!outputs/tables/.gitkeep
+outputs/artifacts/*
+!outputs/artifacts/.gitkeep
+*.joblib
+*.pkl
+
+# --- Ficheiros temporários do Excel ---------------------------------------
+~$*.xlsx
+
+# --- Sistema operativo / editores -----------------------------------------
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
