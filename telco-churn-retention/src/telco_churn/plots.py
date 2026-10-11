@@ -7,8 +7,8 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.ticker import PercentFormatter
 
-from .style import (BLACK, BLUE, CMAP_DIVERGING, GREEN, GREY, TARGET_COLORS, TARGET_LABELS,
-                    WHITE, save_fig)
+from .style import (BG, BLACK, BLUE, CMAP_DIVERGING, GREEN, GREY, GRID, INK, TARGET_COLORS,
+                    TARGET_LABELS, WHITE, save_fig)
 
 
 def _slug(text: str) -> str:
@@ -33,7 +33,7 @@ def plot_target(y: pd.Series, show: bool = True):
     bars = ax.bar(counts.index, counts.values, color=[BLUE, GREEN], width=0.6)
     for b, v in zip(bars, counts.values):
         ax.text(b.get_x() + b.get_width() / 2, v, f"{v:,}\n{v / counts.sum():.1%}",
-                ha="center", va="bottom", color=WHITE, fontsize=9, fontweight="bold")
+                ha="center", va="bottom", color=INK, fontsize=9, fontweight="bold")
     ax.set_ylim(0, counts.max() * 1.25)
     ax.set_title("Distribuição do target (população de modelação)")
     ax.set_ylabel("Nº clientes")
@@ -50,7 +50,7 @@ def plot_numeric(df: pd.DataFrame, col: str, target: str, show: bool = True, pre
     axes[0].set_title(f"{col} — distribuição por target")
     axes[0].legend()
     sns.boxplot(data=df, x=target, y=col, hue=target, palette=TARGET_COLORS, legend=False,
-                ax=axes[1], linecolor=WHITE, flierprops={"markerfacecolor": GREY,
+                ax=axes[1], linecolor=INK, flierprops={"markerfacecolor": GREY,
                                                          "markeredgecolor": GREY, "markersize": 2})
     axes[1].set_xticks([0, 1], ["Stayed", "Churned"])
     axes[1].set_xlabel("")
@@ -62,8 +62,8 @@ def plot_correlation(corr: pd.DataFrame, show: bool = True):
     mask = np.triu(np.ones_like(corr, dtype=bool), k=1)
     fig, ax = plt.subplots(figsize=(11, 9))
     sns.heatmap(corr, mask=mask, cmap=CMAP_DIVERGING, center=0, vmin=-1, vmax=1, annot=True,
-                fmt=".2f", annot_kws={"size": 7, "color": WHITE}, linewidths=0.5,
-                linecolor="#111111", cbar_kws={"shrink": 0.7}, ax=ax)
+                fmt=".2f", annot_kws={"size": 7, "color": INK}, linewidths=0.5,
+                linecolor=GRID, cbar_kws={"shrink": 0.7}, ax=ax)
     ax.grid(False)
     ax.set_title("Correlação de Spearman — numéricas + target")
     save_fig(fig, "08_correlacao_spearman", show)
@@ -83,16 +83,16 @@ def plot_categorical_overview(df: pd.DataFrame, cols: list[str], ncols: int = 4,
         ax.barh([str(i) for i in vc.index], pct.values, color=BLUE, height=0.6)
         ax.invert_yaxis()
         for i, (p, n) in enumerate(zip(pct.values, vc.values)):
-            ax.text(p + 0.01, i, f"{p:.0%}  (n={n:,})", va="center", color=WHITE, fontsize=7)
+            ax.text(p + 0.01, i, f"{p:.0%}  (n={n:,})", va="center", color=INK, fontsize=7)
         ax.set_xlim(0, 1.3)
         ax.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
         ax.xaxis.set_major_formatter(PercentFormatter(1.0))
-        ax.set_title(col, color=GREEN)
+        ax.set_title(col, color=BLUE)
         ax.tick_params(axis="y", labelsize=7)
     for ax in axes[len(cols):]:
         ax.set_visible(False)
     fig.suptitle("Composição das variáveis categóricas — categorias e peso de cada uma",
-                 color=WHITE, fontweight="bold", y=1.0)
+                 color=INK, fontweight="bold", y=1.0)
     save_fig(fig, "09_cat_overview", show)
 
 
@@ -112,7 +112,7 @@ def plot_categorical_detail(df: pd.DataFrame, col: str, target: str, overall_rat
     axes[0].barh(labels, vc.values, color=BLUE, height=0.6)
     axes[0].invert_yaxis()
     for i, n in enumerate(vc.values):
-        axes[0].text(n, i, f"  {n:,} ({n / vc.sum():.1%})", va="center", color=WHITE, fontsize=8)
+        axes[0].text(n, i, f"  {n:,} ({n / vc.sum():.1%})", va="center", color=INK, fontsize=8)
     axes[0].set_xlim(0, vc.max() * 1.45)
     axes[0].set_title(f"{col} — o que contém (nº e % de clientes)")
     axes[0].set_xlabel("Nº clientes")
@@ -128,7 +128,7 @@ def plot_categorical_detail(df: pd.DataFrame, col: str, target: str, overall_rat
         else:           # segmento estreito: rótulo no azul, junto à fronteira
             axes[1].text(1 - r - 0.012, i, f"churn {r:.1%}", va="center", ha="right",
                          color=WHITE, fontsize=8, fontweight="bold")
-    axes[1].axvline(1 - overall_rate, ls="--", lw=1.2, color=WHITE,
+    axes[1].axvline(1 - overall_rate, ls="--", lw=1.2, color=INK,
                     label=f"churn médio {overall_rate:.1%}")
     axes[1].set_xlim(0, 1)
     axes[1].xaxis.set_major_formatter(PercentFormatter(1.0))
@@ -149,7 +149,7 @@ def plot_ranking(s: pd.Series, title: str, name: str, highlight: set | None = No
     ax.barh(s.index, s.values, color=colors, height=0.65)
     ax.invert_yaxis()
     for i, v in enumerate(s.values):
-        ax.text(v, i, f" {v:.3f}", va="center", color=WHITE, fontsize=7)
+        ax.text(v, i, f" {v:.3f}", va="center", color=INK, fontsize=7)
     ax.set_xlim(0, s.max() * 1.15)
     ax.set_title(title)
     ax.set_xlabel(xlabel)
@@ -163,7 +163,7 @@ def plot_leakage_checks(df: pd.DataFrame, target: str, show: bool = True):
                        color=[GREEN if v == 1 else BLUE for v in sat.values])
     for b, v in zip(bars, sat.values):
         axes[0].text(b.get_x() + b.get_width() / 2, v, f"{v:.0%}", ha="center", va="bottom",
-                     color=WHITE, fontsize=8)
+                     color=INK, fontsize=8)
     axes[0].set_ylim(0, 1.15)
     axes[0].yaxis.set_major_formatter(PercentFormatter(1.0))
     axes[0].set_title("Taxa de churn por Satisfaction Score")
