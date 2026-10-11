@@ -40,15 +40,17 @@ telco-churn-retention/
 │   ├── raw/                  # 5 ficheiros Excel originais (não editar)
 │   └── processed/            # train/test/joined gerados pelo pipeline (git-ignored)
 ├── notebooks/
-│   └── 01_preprocessing_eda.ipynb   # notebook principal, documentado por secções
+│   ├── 01_preprocessing_eda.ipynb   # EDA e pré-processamento, documentado por secções
+│   └── 02_modelling_ensemble.ipynb  # modelação ensemble, benchmark IBM e priorização
 ├── src/telco_churn/          # código reutilizável
 │   ├── config.py             # caminhos, seed, % de teste
 │   ├── style.py              # paleta, tema dos gráficos, tabelas formatadas
 │   ├── data.py               # carregar, validar chaves, unir, qualidade
 │   ├── features.py           # população, papéis das variáveis, feature engineering
 │   ├── analysis.py           # perfis, Cramér's V, Mutual Information
-│   ├── plots.py              # gráficos da EDA
-│   └── preprocessing.py      # split, ColumnTransformers, exportação
+│   ├── plots.py              # gráficos da EDA e da modelação
+│   ├── preprocessing.py      # split, ColumnTransformers, exportação
+│   └── modelling.py          # tuning em CV, ensembles, holdout, P(churn) × CLTV
 ├── scripts/
 │   └── run_pipeline.py       # corre tudo sem notebook
 ├── outputs/                  # figuras, tabelas e artefactos (git-ignored)
@@ -123,6 +125,20 @@ Ambos geram:
 | 11 | Feature engineering | `n_add_on_services`, `has_refund`, `avg_hist_charge`, `charge_delta` |
 | 12 | Split e pré-processadores | Split 80/20 estratificado; `ColumnTransformer` *linear* e *trees* |
 | 13 | Exportação | CSVs e `joblib` para a fase de modelação |
+
+### Notebook 02 — modelação ensemble
+
+Corre depois do notebook 01 (usa `data/processed/` e `preprocessing_config.joblib`).
+
+| # | Etapa | O que faz |
+|---|---|---|
+| 3 | Tuning | `RandomizedSearchCV` com `StratifiedKFold` só no treino: Logistic Regression, Random Forest, Extra Trees, HistGradientBoosting |
+| 4 | Ensembles | Soft Voting e Stacking; o modelo final é o de maior AUC em CV |
+| 5–6 | Variantes | `Satisfaction Score` com e sem; `City` com `TargetEncoder` dentro do Pipeline |
+| 7 | Holdout | Avaliação única no teste, lado a lado com o Churn Score IBM |
+| 8 | Interpretação | Permutation importance ao nível das variáveis originais |
+| 9 | Priorização | Lista ordenada por **P(churn) × CLTV** e curva de captura de valor |
+| 10 | Exportação | `final_model.joblib`, `prioridade_holdout.csv`, `prioridade_joined.csv` |
 
 ---
 

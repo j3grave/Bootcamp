@@ -175,3 +175,79 @@ def plot_leakage_checks(df: pd.DataFrame, target: str, show: bool = True):
     axes[1].legend()
     axes[1].set_title("Churn Score IBM (benchmark) por target")
     save_fig(fig, "10_leakage_checks", show)
+
+
+# --- Modelação (notebook 02) ---------------------------------------------------------
+def plot_cv_comparison(cv: pd.DataFrame, benchmark_auc: float | None = None, name: str = "21_cv_modelos",
+                       title: str = "AUC em validação cruzada (5-fold, treino)", show: bool = True):
+    """AUC médio ± desvio-padrão por modelo. Ensembles a verde; benchmark a tracejado."""
+    cv = cv.sort_values("auc")
+    colors = [GREEN if i in ("Soft Voting", "Stacking") else BLUE for i in cv.index]
+    fig, ax = plt.subplots(figsize=(7, 0.42 * len(cv) + 1.2))
+    ax.barh(cv.index, cv["auc"], xerr=cv.get("auc_std"), color=colors, height=0.6,
+            error_kw={"ecolor": WHITE, "elinewidth": 1, "capsize": 3})
+    for i, v in enumerate(cv["auc"]):
+        ax.text(v, i, f"  {v:.3f}", va="center", color=WHITE, fontsize=8)
+    lo = cv["auc"].min()
+    if benchmark_auc is not None:
+        ax.axvline(benchmark_auc, color=GREY, linestyle="--", linewidth=1)
+        ax.text(benchmark_auc, len(cv) - 0.4, " IBM", color=GREY, fontsize=8)
+        lo = min(lo, benchmark_auc)
+    ax.set_xlim(lo - 0.03, 1.0)
+    ax.set_title(title)
+    ax.set_xlabel("ROC AUC")
+    save_fig(fig, name, show)
+
+
+def plot_roc_calibration(y: pd.Series, probas: dict, show: bool = True):
+    """Curvas ROC (esq.) e de calibração (dir.) no holdout."""
+    from sklearn.calibration import calibration_curve
+    from sklearn.metrics import roc_auc_score, roc_curve
+
+    palette = [GREEN, BLUE, WHITE, GREY, "#7FA7FF", "#7FF0B5"]
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
+    for (name, p), c in zip(probas.items(), palette):
+        fpr, tpr, _ = roc_curve(y, p)
+        axes[0].plot(fpr, tpr, color=c, linewidth=1.6, label=f"{name} ({roc_auc_score(y, p):.3f})")
+        frac, mean = calibration_curve(y, p, n_bins=10, strategy="quantile")
+        axes[1].plot(mean, frac, marker="o", markersize=3, color=c, linewidth=1.4, label=name)
+    for ax in axes:
+        ax.plot([0, 1], [0, 1], color=GREY, linestyle=":", linewidth=1)
+        ax.legend(loc="lower right")
+    axes[0].set(title="Curva ROC — holdout", xlabel="Falsos positivos", ylabel="Verdadeiros positivos")
+    axes[1].set(title="Calibração — holdout", xlabel="P(churn) prevista", ylabel="Taxa de churn observada")
+    save_fig(fig, "24_roc_calibracao", show)
+
+
+def plot_capture_curve(curve: pd.DataFrame, show: bool = True):
+    """% do CLTV perdido (clientes que saíram) captado vs % de clientes contactados."""
+    x = curve["% clientes contactados"]
+    palette = [GREEN, BLUE, WHITE, GREY]
+    fig, ax = plt.subplots(figsize=(7, 4.2))
+    for col, c in zip(curve.columns.drop("% clientes contactados"), palette):
+        ax.plot(x, curve[col], color=c, linewidth=1.8, label=col)
+    ax.plot([0, 1], [0, 1], color=GREY, linestyle=":", linewidth=1, label="Aleatório")
+    for ax_fmt in (ax.xaxis, ax.yaxis):
+        ax_fmt.set_major_formatter(PercentFormatter(1.0))
+    ax.set_title("Curva de captura de valor — holdout")
+    ax.set_xlabel("% de clientes contactados (por ordem de prioridade)")
+    ax.set_ylabel("% do CLTV dos churners captado")
+    ax.legend(loc="lower right")
+    save_fig(fig, "25_captura_valor", show)
+
+
+def plot_priority_map(prio: pd.DataFrame, top_n: int, name: str = "26_mapa_prioridade",
+                      show: bool = True):
+    """P(churn) vs CLTV; os top-N por perda esperada a verde."""
+    top = prio["rank"] <= top_n
+    fig, ax = plt.subplots(figsize=(7, 4.4))
+    ax.scatter(prio.loc[~top, "p_churn"], prio.loc[~top, "CLTV"], s=6, color=BLUE, alpha=0.45,
+               label="Restantes")
+    ax.scatter(prio.loc[top, "p_churn"], prio.loc[top, "CLTV"], s=10, color=GREEN, alpha=0.9,
+               label=f"Top {top_n} — P(churn) × CLTV")
+    ax.xaxis.set_major_formatter(PercentFormatter(1.0))
+    ax.set_title("Mapa de prioridade: risco × valor")
+    ax.set_xlabel("P(churn)")
+    ax.set_ylabel("CLTV")
+    ax.legend(loc="upper left")
+    save_fig(fig, name, show)
