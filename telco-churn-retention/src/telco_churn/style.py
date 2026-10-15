@@ -12,37 +12,41 @@ BLUE = "#3777FF"    # Azul Digital — destaque principal
 GREEN = "#0EE071"   # Verde Néon / Data Green — acento
 BLACK = "#000000"   # Preto Profundo — fundo
 
-# Neutros de apoio (apenas texto e grelha, para garantir legibilidade)
+# --- Tema: "light" (fundo branco) ou "dark" (fundo preto) ------------------------
+THEME = "light"
+
 WHITE = "#FFFFFF"
-GREY = "#9AA0A6"
-GRID = "#262626"
+if THEME == "light":
+    BG, INK, GREY, GRID = WHITE, BLACK, "#5F6368", "#E6E8EC"
+else:
+    BG, INK, GREY, GRID = BLACK, WHITE, "#9AA0A6", "#262626"
 
 TARGET_COLORS = {0: BLUE, 1: GREEN}          # 0 = Stayed, 1 = Churned
 TARGET_LABELS = {0: "Stayed", 1: "Churned"}
 
-# Mapa divergente azul -> preto -> verde (correlações)
-CMAP_DIVERGING = LinearSegmentedColormap.from_list("blue_black_green", [BLUE, BLACK, GREEN])
-# Mapa sequencial preto -> azul -> verde (intensidades)
-CMAP_SEQUENTIAL = LinearSegmentedColormap.from_list("black_blue_green", [BLACK, BLUE, GREEN])
+# Mapa divergente azul -> fundo -> verde (correlações)
+CMAP_DIVERGING = LinearSegmentedColormap.from_list("blue_bg_green", [BLUE, BG, GREEN])
+# Mapa sequencial fundo -> azul -> verde (intensidades)
+CMAP_SEQUENTIAL = LinearSegmentedColormap.from_list("bg_blue_green", [BG, BLUE, GREEN])
 
 RC = {
-    "figure.facecolor": BLACK, "axes.facecolor": BLACK, "savefig.facecolor": BLACK,
-    "axes.edgecolor": GRID, "axes.labelcolor": WHITE, "axes.titlecolor": WHITE,
+    "figure.facecolor": BG, "axes.facecolor": BG, "savefig.facecolor": BG,
+    "axes.edgecolor": GRID, "axes.labelcolor": INK, "axes.titlecolor": INK,
     "axes.titleweight": "bold", "axes.titlesize": 10, "axes.labelsize": 9,
-    "text.color": WHITE, "xtick.color": GREY, "ytick.color": GREY,
+    "text.color": INK, "xtick.color": GREY, "ytick.color": GREY,
     "xtick.labelsize": 8, "ytick.labelsize": 8,
     "grid.color": GRID, "grid.linewidth": 0.6, "axes.grid": True,
-    "legend.facecolor": BLACK, "legend.edgecolor": GRID, "legend.labelcolor": WHITE,
+    "legend.facecolor": BG, "legend.edgecolor": GRID, "legend.labelcolor": INK,
     "legend.fontsize": 8, "figure.dpi": 110, "savefig.dpi": 140,
-    "axes.prop_cycle": cycler(color=[BLUE, GREEN, WHITE, GREY]),
+    "axes.prop_cycle": cycler(color=[BLUE, GREEN, INK, GREY]),
     "font.family": "DejaVu Sans",
-    "patch.edgecolor": BLACK, "patch.linewidth": 0.0,
+    "patch.edgecolor": BG, "patch.linewidth": 0.0,
 }
 
 
 def apply_theme() -> None:
     """Aplica o tema escuro com a paleta do projeto a todos os gráficos."""
-    sns.set_theme(context="notebook", style="darkgrid", rc=RC)
+    sns.set_theme(context="notebook", style="whitegrid" if THEME == "light" else "darkgrid", rc=RC)
     plt.rcParams.update(RC)
 
 
@@ -57,7 +61,7 @@ def save_fig(fig, name: str, show: bool = True) -> None:
 
 
 def style_table(df: pd.DataFrame, precision: int = 3, highlight: str | None = None):
-    """Devolve um Styler com a paleta do projeto (fundo preto, cabeçalho azul).
+    """Devolve um Styler com a paleta do projeto (cabeçalho azul, fundo do tema).
 
     highlight: nome de uma coluna numérica para destacar com barras verdes.
     """
@@ -65,10 +69,10 @@ def style_table(df: pd.DataFrame, precision: int = 3, highlight: str | None = No
         df.style.format(precision=precision, na_rep="—")
         .set_table_styles([
             {"selector": "th", "props": [("background-color", BLUE), ("color", WHITE),
-                                         ("font-weight", "bold"), ("border", f"1px solid {BLACK}")]},
-            {"selector": "td", "props": [("background-color", BLACK), ("color", WHITE),
+                                         ("font-weight", "bold"), ("border", f"1px solid {BG}")]},
+            {"selector": "td", "props": [("background-color", BG), ("color", INK),
                                          ("border", f"1px solid {GRID}")]},
-            {"selector": "caption", "props": [("color", GREEN), ("font-weight", "bold"),
+            {"selector": "caption", "props": [("color", BLUE), ("font-weight", "bold"),
                                               ("caption-side", "top")]},
         ])
     )
