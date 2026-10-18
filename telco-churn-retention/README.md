@@ -41,18 +41,27 @@ telco-churn-retention/
 │   └── processed/            # train/test/joined gerados pelo pipeline (git-ignored)
 ├── notebooks/
 │   ├── 01_preprocessing_eda.ipynb   # EDA e pré-processamento, documentado por secções
-│   └── 02_modelling_ensemble.ipynb  # modelação ensemble, benchmark IBM e priorização
+│   ├── 01b_profiling_ydata.ipynb    # relatórios ydata-profiling
+│   └── 02_modelling_eda.ipynb       # modelos, rede neuronal, ensembles, benchmark IBM e priorização
+├── docs/
+│   ├── models.md             # como funciona cada modelo, hiperparâmetros e papel no projeto
+│   └── modelling.md          # protocolo de avaliação, métricas, gráficos e decisões
 ├── src/telco_churn/          # código reutilizável
 │   ├── config.py             # caminhos, seed, % de teste
 │   ├── style.py              # paleta, tema dos gráficos, tabelas formatadas
 │   ├── data.py               # carregar, validar chaves, unir, qualidade
 │   ├── features.py           # população, papéis das variáveis, feature engineering
 │   ├── analysis.py           # perfis, Cramér's V, Mutual Information
-│   ├── plots.py              # gráficos da EDA e da modelação
+│   ├── plots.py              # gráficos da EDA
+│   ├── profiling.py          # relatórios ydata-profiling com a paleta do projeto
 │   ├── preprocessing.py      # split, ColumnTransformers, exportação
-│   └── modelling.py          # tuning em CV, ensembles, holdout, P(churn) × CLTV
+│   ├── modelling.py          # modelos, tuning em CV, ensembles, métricas, holdout, P(churn) × CLTV
+│   └── model_plots.py        # gráficos da modelação
 ├── scripts/
-│   └── run_pipeline.py       # corre tudo sem notebook
+│   ├── run_pipeline.py       # pré-processamento e EDA sem notebook
+│   ├── run_profiling.py      # relatórios ydata-profiling
+│   ├── run_modelling.py      # modelação completa sem notebook
+│   └── run_all.py            # corre os três, por ordem
 ├── outputs/                  # figuras, tabelas e artefactos (git-ignored)
 ├── reports/                  # guia do projeto, status reports, apresentação
 ├── .vscode/                  # definições partilhadas do VS Code
@@ -97,15 +106,29 @@ nbstripout --install      # limpa outputs dos notebooks em cada commit
 
 ### 2. Correr o pipeline
 
-- **No VS Code:** abrir `notebooks/01_preprocessing_eda.ipynb`, selecionar o kernel `.venv` e escolher *Run All*.
-- **Pela linha de comandos:** `python scripts/run_pipeline.py`
+As fases correm por ordem, porque cada uma usa os ficheiros gerados pela anterior:
 
-Ambos geram:
+| Fase | No VS Code (kernel `.venv`, *Run All*) | Pela linha de comandos |
+|---|---|---|
+| 1. Pré-processamento e EDA | `notebooks/01_preprocessing_eda.ipynb` | `python scripts/run_pipeline.py` |
+| 1b. Profiling (opcional) | `notebooks/01b_profiling_ydata.ipynb` | `python scripts/run_profiling.py` |
+| 2. Modelação | `notebooks/02_modelling_eda.ipynb` | `python scripts/run_modelling.py` |
+
+Para correr tudo de uma vez: `python scripts/run_all.py` (ou `--sem-profiling`, para saltar os relatórios). Para testar alterações à modelação depressa: `python scripts/run_modelling.py --rapido`.
+
+A fase 1 gera:
 
 - `data/processed/`: `train.csv`, `test.csv`, `joined_para_scoring.csv`, `telco_merged_full.csv`
 - `outputs/figures/`: cerca de 40 gráficos da EDA
 - `outputs/tables/`: perfis, dicionário de categorias, Cramér's V, Mutual Information
 - `outputs/artifacts/preprocessing_config.joblib`: pré-processadores e listas de features
+
+A fase 2 gera:
+
+- `outputs/tables/10_*` a `15_*`: tuning, métricas em CV, variantes, holdout, importância e captura de valor
+- `outputs/figures/20_*` a `27_*`: comparação dos modelos, métricas por modelo, curvas, matrizes de confusão, rede neuronal e priorização
+- `outputs/artifacts/final_model.joblib`: modelo final treinado, features e métricas
+- `data/processed/prioridade_holdout.csv` e `prioridade_joined.csv`: listas de intervenção
 
 ---
 
@@ -126,19 +149,20 @@ Ambos geram:
 | 12 | Split e pré-processadores | Split 80/20 estratificado; `ColumnTransformer` *linear* e *trees* |
 | 13 | Exportação | CSVs e `joblib` para a fase de modelação |
 
-### Notebook 02 — modelação ensemble
+### Notebook 02 — modelação
 
-Corre depois do notebook 01 (usa `data/processed/` e `preprocessing_config.joblib`).
+Corre depois do notebook 01 (usa `data/processed/` e `preprocessing_config.joblib`). A explicação de cada modelo está em [`docs/models.md`](docs/models.md) e o protocolo de avaliação em [`docs/modelling.md`](docs/modelling.md).
 
 | # | Etapa | O que faz |
 |---|---|---|
-| 3 | Tuning | `RandomizedSearchCV` com `StratifiedKFold` só no treino: Logistic Regression, Random Forest, Extra Trees, HistGradientBoosting |
-| 4 | Ensembles | Soft Voting e Stacking; o modelo final é o de maior AUC em CV |
-| 5–6 | Variantes | `Satisfaction Score` com e sem; `City` com `TargetEncoder` dentro do Pipeline |
-| 7 | Holdout | Avaliação única no teste, lado a lado com o Churn Score IBM |
-| 8 | Interpretação | Permutation importance ao nível das variáveis originais |
-| 9 | Priorização | Lista ordenada por **P(churn) × CLTV** e curva de captura de valor |
-| 10 | Exportação | `final_model.joblib`, `prioridade_holdout.csv`, `prioridade_joined.csv` |
+| 3 | Modelos | Tabela dos modelos (família, pré-processador, funcionamento), a rede neuronal e as nove métricas |
+| 4 | Tuning | `RandomizedSearchCV` com `StratifiedKFold`, só no treino, para os 7 modelos base: Logistic Regression, Decision Tree, k-Nearest Neighbors, Neural Network (MLP), Random Forest, Extra Trees e Gradient Boosting |
+| 5 | Comparação e ensembles | Soft Voting e Stacking; todos os modelos no mesmo 5-fold com nove métricas; diversidade, painel de métricas, sobreajuste, curvas ROC/PR, matrizes de confusão, limiar e treino da rede neuronal; o modelo final é o de maior AUC em CV |
+| 6–7 | Variantes | `Satisfaction Score` com e sem; `City` com `TargetEncoder` dentro do Pipeline |
+| 8 | Holdout | Avaliação única no teste, com as nove métricas, lado a lado com o Churn Score IBM |
+| 9 | Interpretação | Permutation importance ao nível das variáveis originais |
+| 10 | Priorização | Lista ordenada por **P(churn) × CLTV** e curva de captura de valor |
+| 11 | Exportação | `final_model.joblib`, `prioridade_holdout.csv`, `prioridade_joined.csv` |
 
 ---
 
@@ -153,6 +177,10 @@ Corre depois do notebook 01 (usa `data/processed/` e `preprocessing_config.jobli
 | Remover `Under 30`, `Senior Citizen`, `Dependents`, `Referred a Friend`, `Total Revenue` | São derivações exatas de outras colunas (verificadas a 100%) |
 | Remover `Country`, `State`, `Lat Long`, `Zip Code`, `City` | São constantes, duplicadas ou de alta cardinalidade |
 | PCA não incluída nesta fase | Os ensembles de árvores não precisam dela e a interpretabilidade é crítica para a retenção |
+| Seleção do modelo por ROC AUC em CV (5-fold), holdout usado uma vez | A retenção trabalha com uma lista ordenada; o desvio-padrão entre folds mostra se as diferenças são reais |
+| Rede neuronal com `MLPClassifier` (scikit-learn) | Encaixa no `Pipeline`, no tuning e nos ensembles sem novas dependências; equivale a Keras para uma rede deste tamanho |
+| Ensembles com LR, MLP, Random Forest, Extra Trees e Gradient Boosting | Membros fortes e de famílias diferentes, fixados antes de ver os resultados |
+| Gráficos da modelação em `model_plots.py`, separados de `plots.py` | Uma alteração aos gráficos da EDA não apaga os da modelação, e vice-versa |
 
 ---
 
@@ -186,7 +214,8 @@ Regras do grupo:
 - Não fazer commit de dados processados nem de outputs: cada membro regenera-os localmente.
 - Não editar os ficheiros em `data/raw/`.
 - Novas funções vão para `src/telco_churn/` e os notebooks servem para explorar e narrar.
-- Notebooks numerados por fase: `01_preprocessing_eda`, `02_modelling_ensemble`, `03_prioritization`.
+- Notebooks numerados por fase: `01_preprocessing_eda`, `02_modelling_eda`, `03_prioritization`.
+- Cada notebook tem um script equivalente em `scripts/`; uma alteração a um modelo faz-se em `src/telco_churn/` e vale para os dois.
 
 ---
 
