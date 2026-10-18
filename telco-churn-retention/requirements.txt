@@ -4,7 +4,10 @@ openpyxl>=3.1
 matplotlib>=3.8
 seaborn>=0.13
 scikit-learn>=1.4
+scipy>=1.11        # distribuições do RandomizedSearchCV (loguniform)
 joblib>=1.3
 jinja2>=3.1        # tabelas formatadas (pandas Styler)
 ipykernel>=6.29    # executar o notebook no VS Code
 nbstripout>=0.7    # limpar outputs dos notebooks antes do commit
+ydata-profiling>=4.12  # relatórios HTML (notebook 01b, scripts/run_profiling.py)
+setuptools<81      # o ydata-profiling ainda usa pkg_resources
