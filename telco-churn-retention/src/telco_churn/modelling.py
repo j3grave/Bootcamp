@@ -77,8 +77,14 @@ ENSEMBLES = ["Soft Voting", "Stacking"]
 # bagging, boosting). A árvore isolada e o kNN ficam de fora: são mais fracos e já estão
 # representados, com vantagem, pelas florestas. A escolha é fixa à partida, e não feita a
 # olhar para os resultados, para que a validação cruzada continue a ser um juiz justo.
-ENSEMBLE_MEMBERS = ["Logistic Regression", "Neural Network (MLP)", "Random Forest",
-                    "Extra Trees", "Gradient Boosting"]
+# O sklearn pede um nome curto para cada membro (sem espaços), por isso guardamos os dois.
+ENSEMBLE_MEMBERS = {
+    "Logistic Regression": "lr",
+    "Neural Network (MLP)": "mlp",
+    "Random Forest": "rf",
+    "Extra Trees": "et",
+    "Gradient Boosting": "gb",
+}
 
 # Descrição curta de cada modelo (tabelas do notebook). Detalhe completo em docs/models.md.
 MODEL_INFO = pd.DataFrame([
@@ -137,11 +143,6 @@ def classification_metrics(y, p, threshold: float = THRESHOLD) -> dict:
         "recall": metrics.recall_score(y, flagged),
         "f1": metrics.f1_score(y, flagged, zero_division=0),
     }
-
-
-def score_metrics(y, p) -> dict:
-    """Mantida por compatibilidade: as nove métricas (inclui auc, pr_auc e brier)."""
-    return classification_metrics(y, p)
 
 
 def metrics_glossary() -> pd.DataFrame:
@@ -214,8 +215,9 @@ def build_models(num: list[str], cat: list[str], params: dict, te: list[str] = (
     preps = make_preprocessors(num, cat, te)
     base = {name: _pipeline(preps[kind], clone(clf).set_params(**params.get(name, {})))
             for name, (kind, clf, _) in BASE_MODELS.items()}
-    members = [(n.lower().replace(" ", "_").replace("(", "").replace(")", ""), clone(base[n]))
-               for n in ENSEMBLE_MEMBERS]
+    members = []
+    for name, short_name in ENSEMBLE_MEMBERS.items():
+        members.append((short_name, clone(base[name])))
     ensembles = {
         "Soft Voting": VotingClassifier(members, voting="soft", n_jobs=-1),
         "Stacking": StackingClassifier(members, final_estimator=LogisticRegression(max_iter=1000),

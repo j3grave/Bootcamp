@@ -69,15 +69,15 @@ def main() -> None:
     cv_table, oof = modelling.cv_evaluate(models, X_train, y_train)
     cv_table.to_csv(TAB_DIR / "11_cv_modelos.csv")
     BEST = modelling.select_best(cv_table)
-    auc_ibm_train = modelling.score_metrics(y_train, train["Churn Score"] / 100)["auc"]
+    auc_ibm_train = modelling.classification_metrics(y_train, train["Churn Score"] / 100)["auc"]
 
     corr = modelling.prediction_correlation(oof)
     corr.to_csv(TAB_DIR / "11c_correlacao_modelos.csv")
     model_plots.plot_diversity(corr, show=False)
     model_plots.plot_cv_comparison(cv_table, benchmark_auc=auc_ibm_train, show=False)
     view = modelling.metrics_view(cv_table)
-    std = cv_table[[f"{m}_std" for m in modelling.METRICS]].set_axis(list(modelling.METRICS),
-                                                                     axis=1)
+    std = cv_table[[f"{m}_std" for m in modelling.METRICS]]
+    std.columns = list(modelling.METRICS)
     model_plots.plot_metrics_panel(view, std=std, train=modelling.metrics_view(cv_table, "train"),
                                    best=BEST, show=False)
     model_plots.plot_metrics_heatmap(view, show=False)
