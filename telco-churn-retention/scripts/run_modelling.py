@@ -231,6 +231,11 @@ def main() -> None:
     prio_test = modelling.priority_list(test_est, p_test_est).merge(
         test_est[["Customer ID", TARGET]], on="Customer ID")
     model_plots.plot_priority_map(prio_test, 200, show=False)
+    prio_test = prio_test.merge(test_est[["Customer ID"] + retention.ACTION_COLS], on="Customer ID")
+    prio_test["acao_sugerida"] = retention.suggest_action(prio_test)
+    n_campanha = int(scenarios.loc["Base", "N_regra_valor_esperado"])
+    actions = retention.actions_summary(prio_test, n_campanha, TARGET)
+    actions.to_csv(TAB_DIR / "21_acoes_sugeridas.csv")
 
     # 11 · Clientes novos: regra de onboarding (sem P(churn) para os Joined)
     merged = pd.read_csv(DATA_PROCESSED / "telco_merged_full.csv", keep_default_na=False,
@@ -278,6 +283,8 @@ def main() -> None:
     print(orderings_compared.round(3).to_string())
     print("Custo-benefício (pressupostos ilustrativos):")
     print(scenarios.round(2).to_string())
+    print(f"Ações sugeridas no top {n_campanha} (cenário Base) — hipóteses a testar:")
+    print(actions.round(2).to_string())
     print("Regra de onboarding (clientes novos):")
     print(regra.round(2).to_string())
     print("Ver outputs/figures, outputs/tables, outputs/artifacts e data/processed.")

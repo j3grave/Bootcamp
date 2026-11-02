@@ -131,3 +131,39 @@ def sensitivity_grid(p, cltv, success_rates, costs) -> pd.DataFrame:
         for cost in costs:
             grid.loc[success_rate, cost] = expected_contacts(p, cltv, success_rate, cost) / len(p)
     return grid
+
+
+# --- Ações sugeridas para a lista de intervenção -------------------------------------------
+# Hipóteses de negócio a testar, não efeitos causais. Usam só variáveis conhecidas antes do
+# churn (Churn Reason / Churn Category não podem ser usadas: só existem depois da saída).
+ACTION_ORDER = ["Proposta de contrato anual", "Oferta de suporte técnico e segurança",
+                "Revisão de tarifário antes da renovação"]
+ACTION_COLS = ["Contract", "Internet Type", "Online Security", "Premium Tech Support"]
+
+
+def suggest_action(df: pd.DataFrame) -> pd.Series:
+    """Ação sugerida para cada cliente da lista; as condições são testadas por ordem.
+
+    1. Month-to-Month: o churn concentra-se nos contratos mensais -> propor contrato anual.
+    2. Fibra sem Online Security nem Premium Tech Support: churn mais alto sem estes serviços
+       -> oferecer suporte técnico e segurança.
+    3. Restantes (já com contrato de 1 ou 2 anos) -> rever o tarifário antes da renovação.
+    """
+    month_to_month = df["Contract"] == "Month-to-Month"
+    fiber_without_support = ((df["Internet Type"] == "Fiber Optic")
+                             & (df["Online Security"] == "No")
+                             & (df["Premium Tech Support"] == "No"))
+    action = np.select([month_to_month, fiber_without_support], ACTION_ORDER[:2],
+                       default=ACTION_ORDER[2])
+    return pd.Series(action, index=df.index, name="acao_sugerida")
+
+
+def actions_summary(prio: pd.DataFrame, top_n: int, target: str) -> pd.DataFrame:
+    """Top-N da lista por ação sugerida: nº de clientes, perda esperada e churn real (holdout)."""
+    top = prio[prio["rank"] <= top_n]
+    summary = top.groupby("acao_sugerida").agg(
+        clientes=("Customer ID", "size"),
+        perda_esperada=("perda_esperada", "sum"),
+        churn_real=(target, "mean"),
+    )
+    return summary.reindex(ACTION_ORDER).dropna(how="all")
