@@ -175,12 +175,12 @@ def make_preprocessors(num: list[str], cat: list[str], te: list[str] = ()) -> di
     """Pré-processadores do notebook 01 + TargetEncoder opcional (ex.: City).
 
     O TargetEncoder fica dentro do Pipeline: é ajustado só nos dados de treino de cada fold.
+    Recebe o mesmo StratifiedKFold (CV) do resto do projeto, para dar sempre o mesmo resultado.
     """
     preps = build_preprocessors(num, cat)
     if te:
         for p in preps.values():
-            p.transformers.append(("te", TargetEncoder(target_type="binary",
-                                                       random_state=RANDOM_STATE), list(te)))
+            p.transformers.append(("te", TargetEncoder(target_type="binary", cv=CV), list(te)))
     return preps
 
 

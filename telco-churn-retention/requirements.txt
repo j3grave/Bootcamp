@@ -3,7 +3,7 @@ numpy>=1.26
 openpyxl>=3.1
 matplotlib>=3.8
 seaborn>=0.13
-scikit-learn>=1.4
+scikit-learn>=1.9   # TargetEncoder(cv=...) com um StratifiedKFold
 scipy>=1.11        # distribuições do RandomizedSearchCV (loguniform)
 joblib>=1.3
 jinja2>=3.1        # tabelas formatadas (pandas Styler)
