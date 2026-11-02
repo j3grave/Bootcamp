@@ -32,6 +32,16 @@ from telco_churn.config import ARTIFACTS_DIR, DATA_PROCESSED, TAB_DIR, ensure_di
 from telco_churn.style import apply_theme
 
 
+# Parâmetros de negócio — PRESSUPOSTOS, NÃO DADOS (iguais aos do notebook 02, secção 11.2).
+#   taxa_sucesso   : % dos churners contactados que ficam por causa do contacto
+#   custo_contacto : custo por cliente contactado (contacto + incentivo), na unidade do CLTV
+CENARIOS = {
+    "Pessimista": {"taxa_sucesso": 0.10, "custo_contacto": 150},
+    "Base":       {"taxa_sucesso": 0.20, "custo_contacto": 100},
+    "Otimista":   {"taxa_sucesso": 0.30, "custo_contacto": 50},
+}
+
+
 def step(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -204,6 +214,20 @@ def main() -> None:
         y_test_est, test_est["CLTV"], score_p=p_test_est,
         score_value=p_test_est * test_est["CLTV"])
     orderings_compared.to_csv(TAB_DIR / "15b_P_vs_PxCLTV.csv")
+
+    # Custo-benefício: os pressupostos estão em CENARIOS, no topo do ficheiro
+    scenarios = retention.scenario_table(y_test_est, p_test_est, test_est["CLTV"], CENARIOS)
+    scenarios.to_csv(TAB_DIR / "20_cenarios_custo_beneficio.csv")
+    value_curves = {}
+    for name, params in CENARIOS.items():
+        value_curves[name] = retention.net_value_curve(
+            y_test_est, test_est["CLTV"], p_test_est * test_est["CLTV"],
+            params["taxa_sucesso"], params["custo_contacto"])
+    model_plots.plot_net_value(value_curves, show=False)
+    sensitivity = retention.sensitivity_grid(p_test_est, test_est["CLTV"],
+                                             success_rates=[0.05, 0.10, 0.20, 0.30, 0.40],
+                                             costs=[25, 50, 100, 150, 200])
+    sensitivity.to_csv(TAB_DIR / "20b_sensibilidade_pct_contactar.csv")
     prio_test = modelling.priority_list(test_est, p_test_est).merge(
         test_est[["Customer ID", TARGET]], on="Customer ID")
     model_plots.plot_priority_map(prio_test, 200, show=False)
@@ -252,6 +276,8 @@ def main() -> None:
           f" | IBM {capture.loc['IBM: só Churn Score', 'top 20%']:.1%}")
     print("P vs P × CLTV (modelo de priorização):")
     print(orderings_compared.round(3).to_string())
+    print("Custo-benefício (pressupostos ilustrativos):")
+    print(scenarios.round(2).to_string())
     print("Regra de onboarding (clientes novos):")
     print(regra.round(2).to_string())
     print("Ver outputs/figures, outputs/tables, outputs/artifacts e data/processed.")
