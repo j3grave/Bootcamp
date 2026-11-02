@@ -27,7 +27,7 @@ import joblib
 import pandas as pd
 from sklearn.inspection import permutation_importance
 
-from telco_churn import model_plots, modelling, plots
+from telco_churn import features, model_plots, modelling, plots
 from telco_churn.config import ARTIFACTS_DIR, DATA_PROCESSED, TAB_DIR, ensure_dirs
 from telco_churn.style import apply_theme
 
@@ -147,30 +147,79 @@ def main() -> None:
     plots.plot_ranking(importance.head(20), f"Permutation importance — {BEST} (queda de AUC, holdout)",
                        "27_importancia_permutacao", highlight=set(CAT + ["City"]), show=False)
 
-    # 9 · Priorização
+    # 9 · Modelo de priorização: só clientes estabelecidos (tenure > 3), mesmo protocolo
+    train_est = train[features.is_established(train)]
+    test_est = test[features.is_established(test)]
+    X_train_est, y_train_est = train_est[FEATURES], train_est[TARGET]
+    X_test_est, y_test_est = test_est[FEATURES], test_est[TARGET]
+    step(f"Modelo de priorização: tuning e CV em {len(train_est)} clientes estabelecidos...")
+    best_params_est, tuning_est = modelling.tune_base_models(X_train_est, y_train_est, NUM, CAT,
+                                                            n_iter=n_iter)
+    tuning_est.to_csv(TAB_DIR / "16_tuning_estabelecidos.csv")
+    models_est = modelling.build_models(NUM, CAT, best_params_est)
+    cv_est, _ = modelling.cv_evaluate(models_est, X_train_est, y_train_est)
+    cv_est.to_csv(TAB_DIR / "16b_cv_modelos_estabelecidos.csv")
+    auc_ibm_train_est = modelling.classification_metrics(
+        y_train_est, train_est["Churn Score"] / 100)["auc"]
+    model_plots.plot_cv_comparison(cv_est, benchmark_auc=auc_ibm_train_est,
+                                   name="28_cv_modelos_estabelecidos",
+                                   title="AUC em validação cruzada — clientes estabelecidos (tenure > 3)",
+                                   show=False)
+    BEST_EST = modelling.select_best(cv_est)
+    step(f"Modelo de priorização: {BEST_EST} ({cv_est.loc[BEST_EST, 'auc']:.4f})")
+
+    priority_model = models_est[BEST_EST].fit(X_train_est, y_train_est)
+    p_test_est = priority_model.predict_proba(X_test_est)[:, 1]
+    est_mask = features.is_established(test).to_numpy()
+    comparison = modelling.comparison_table([
+        ("Modelo core: " + BEST, "holdout completo", y_test, p_test),
+        ("Churn Score IBM", "holdout completo", y_test, test["Churn Score"] / 100),
+        ("Modelo core: " + BEST, "holdout tenure > 3", y_test[est_mask], p_test[est_mask]),
+        ("Modelo de priorização: " + BEST_EST, "holdout tenure > 3", y_test_est, p_test_est),
+        ("Churn Score IBM", "holdout tenure > 3", y_test_est, test_est["Churn Score"] / 100),
+    ])
+    comparison.to_csv(TAB_DIR / "17_comparacao_core_priorizacao.csv")
+
+    pi_est = permutation_importance(priority_model, X_test_est, y_test_est, scoring="roc_auc",
+                                    n_repeats=5, random_state=0, n_jobs=-1)
+    importance_est = pd.Series(pi_est.importances_mean, index=FEATURES).clip(lower=0)
+    importance_est = importance_est.sort_values(ascending=False)
+    importance_est.to_frame("queda_auc").to_csv(TAB_DIR / "18_importancia_priorizacao.csv")
+    plots.plot_ranking(importance_est.head(20),
+                       f"Permutation importance — {BEST_EST} (tenure > 3, holdout)",
+                       "29_importancia_priorizacao", highlight=set(CAT), show=False)
+
+    # 10 · Priorização dos clientes estabelecidos
     orderings = {
-        BEST + ": P × CLTV": p_test * test["CLTV"], BEST + ": só P(churn)": p_test,
-        "IBM: Churn Score × CLTV": test["Churn Score"] * test["CLTV"],
-        "IBM: só Churn Score": test["Churn Score"],
+        "Modelo: P × CLTV": p_test_est * test_est["CLTV"],
+        "Modelo: só P(churn)": p_test_est,
+        "IBM: Churn Score × CLTV": test_est["Churn Score"] * test_est["CLTV"],
+        "IBM: só Churn Score": test_est["Churn Score"],
     }
-    curve = modelling.capture_curve(y_test, test["CLTV"], orderings)
+    curve = modelling.capture_curve(y_test_est, test_est["CLTV"], orderings)
     capture = modelling.capture_at(curve)
     capture.to_csv(TAB_DIR / "15_captura_valor.csv")
     model_plots.plot_capture_curve(curve, show=False)
-    prio_test = modelling.priority_list(test, p_test).merge(test[["Customer ID", TARGET]],
-                                                            on="Customer ID")
+    prio_test = modelling.priority_list(test_est, p_test_est).merge(
+        test_est[["Customer ID", TARGET]], on="Customer ID")
     model_plots.plot_priority_map(prio_test, 200, show=False)
     p_joined = final_model.predict_proba(joined[FINAL_FEATURES])[:, 1]
     prio_joined = modelling.priority_list(joined, p_joined)
 
-    # 10 · Exportação
+    # 11 · Exportação
     joblib.dump({"model": final_model, "name": BEST, "features": FINAL_FEATURES,
                  "target": TARGET, "best_params": best_params,
                  "holdout": holdout.loc[BEST].to_dict()}, ARTIFACTS_DIR / "final_model.joblib")
+    joblib.dump({"model": priority_model, "name": BEST_EST, "features": FEATURES,
+                 "target": TARGET, "population": "Churned + Stayed com tenure > 3",
+                 "best_params": best_params_est,
+                 "holdout": comparison.loc[("holdout tenure > 3",
+                                            "Modelo de priorização: " + BEST_EST)].to_dict()},
+                ARTIFACTS_DIR / "priority_model.joblib")
     prio_test.to_csv(DATA_PROCESSED / "prioridade_holdout.csv", index=False)
     prio_joined.to_csv(DATA_PROCESSED / "prioridade_joined.csv", index=False)
 
-    # 11 · Resumo
+    # 12 · Resumo
     ibm = holdout.loc["Churn Score IBM (benchmark)"]
     print("\n=== Resumo ===")
     print(f"Modelo final: {BEST}")
@@ -178,7 +227,9 @@ def main() -> None:
           f" | Brier {holdout.loc[BEST, 'brier']:.3f}")
     print(f"  IBM      AUC {ibm['auc']:.3f} | PR-AUC {ibm['pr_auc']:.3f} | Brier {ibm['brier']:.3f}")
     print(f"  Rede neuronal (MLP) no holdout: AUC {holdout.loc['Neural Network (MLP)', 'auc']:.3f}")
-    print(f"  Top 20% por P × CLTV capta {capture.loc[BEST + ': P × CLTV', 'top 20%']:.1%}"
+    print(f"Modelo de priorização (tenure > 3): {BEST_EST}")
+    print(comparison[["clientes", "auc", "pr_auc", "brier"]].round(3).to_string())
+    print(f"  Top 20% por P × CLTV capta {capture.loc['Modelo: P × CLTV', 'top 20%']:.1%}"
           f" do CLTV perdido (IBM: {capture.loc['IBM: só Churn Score', 'top 20%']:.1%})")
     print("Ver outputs/figures, outputs/tables, outputs/artifacts e data/processed.")
 

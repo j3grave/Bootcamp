@@ -333,6 +333,21 @@ def holdout_report(probas: dict, y: pd.Series, benchmark: pd.Series) -> pd.DataF
     return pd.DataFrame(rows).T.sort_values("auc", ascending=False)
 
 
+def comparison_table(rows: list) -> pd.DataFrame:
+    """Métricas de vários modelos, cada um no conjunto de clientes indicado.
+
+    rows: lista de (modelo, conjunto, y, P(churn)). Serve para comparar modelos treinados em
+    populações diferentes: só faz sentido comparar linhas com o mesmo conjunto.
+    """
+    table = []
+    for model_name, subset_name, y, p in rows:
+        row = {"modelo": model_name, "conjunto": subset_name,
+               "clientes": len(y), "taxa_churn": np.mean(y)}
+        row.update(classification_metrics(y, p))
+        table.append(row)
+    return pd.DataFrame(table).set_index(["conjunto", "modelo"])
+
+
 # --- Priorização -------------------------------------------------------------------------
 def priority_list(df: pd.DataFrame, proba: np.ndarray, id_col: str = "Customer ID",
                   cltv_col: str = "CLTV") -> pd.DataFrame:
