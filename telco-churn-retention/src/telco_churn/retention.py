@@ -34,3 +34,36 @@ def onboarding_list(joined: pd.DataFrame) -> pd.DataFrame:
     out["ordem_segmento"] = out["onboarding"].map({s: i for i, s in enumerate(ONBOARDING_ORDER)})
     out = out.sort_values(["ordem_segmento", "CLTV"], ascending=[True, False])
     return out.drop(columns="ordem_segmento").reset_index(drop=True)
+
+
+# --- Priorização dos clientes estabelecidos ------------------------------------------------
+def top_k_positions(score, k: int) -> np.ndarray:
+    """Posições dos k clientes com maior score."""
+    order = np.argsort(-np.asarray(score, dtype=float), kind="stable")
+    return order[:k]
+
+
+def compare_orderings(y, cltv, score_p, score_value, cuts=(0.1, 0.2, 0.3)) -> pd.DataFrame:
+    """Compara duas listas de contacto do mesmo tamanho: por P(churn) e por P(churn) × CLTV.
+
+    Para cada corte (ex.: contactar 20% dos clientes) mostra quantos clientes as duas listas
+    têm em comum, que % dos churners cada uma apanha e que % do CLTV perdido cada uma cobre.
+    """
+    y = np.asarray(y)
+    cltv = np.asarray(cltv, dtype=float)
+    lost_value = cltv * y          # CLTV de quem saiu de facto
+    rows = []
+    for cut in cuts:
+        k = int(round(cut * len(y)))
+        top_p = top_k_positions(score_p, k)
+        top_value = top_k_positions(score_value, k)
+        rows.append({
+            "corte": f"top {cut:.0%}",
+            "clientes_contactados": k,
+            "em_comum": len(set(top_p) & set(top_value)) / k,
+            "churners_apanhados_P": y[top_p].sum() / y.sum(),
+            "churners_apanhados_PxCLTV": y[top_value].sum() / y.sum(),
+            "CLTV_perdido_coberto_P": lost_value[top_p].sum() / lost_value.sum(),
+            "CLTV_perdido_coberto_PxCLTV": lost_value[top_value].sum() / lost_value.sum(),
+        })
+    return pd.DataFrame(rows).set_index("corte")

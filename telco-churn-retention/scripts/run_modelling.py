@@ -200,6 +200,10 @@ def main() -> None:
     capture = modelling.capture_at(curve)
     capture.to_csv(TAB_DIR / "15_captura_valor.csv")
     model_plots.plot_capture_curve(curve, show=False)
+    orderings_compared = retention.compare_orderings(
+        y_test_est, test_est["CLTV"], score_p=p_test_est,
+        score_value=p_test_est * test_est["CLTV"])
+    orderings_compared.to_csv(TAB_DIR / "15b_P_vs_PxCLTV.csv")
     prio_test = modelling.priority_list(test_est, p_test_est).merge(
         test_est[["Customer ID", TARGET]], on="Customer ID")
     model_plots.plot_priority_map(prio_test, 200, show=False)
@@ -240,8 +244,14 @@ def main() -> None:
     print(f"  Rede neuronal (MLP) no holdout: AUC {holdout.loc['Neural Network (MLP)', 'auc']:.3f}")
     print(f"Modelo de priorização (tenure > 3): {BEST_EST}")
     print(comparison[["clientes", "auc", "pr_auc", "brier"]].round(3).to_string())
-    print(f"  Top 20% por P × CLTV capta {capture.loc['Modelo: P × CLTV', 'top 20%']:.1%}"
-          f" do CLTV perdido (IBM: {capture.loc['IBM: só Churn Score', 'top 20%']:.1%})")
+    # Comparar sempre ordenações do mesmo tipo: P × CLTV com P × CLTV, só P com só P
+    print("Top 20% dos clientes estabelecidos (% do CLTV perdido coberto):")
+    print(f"  P × CLTV: modelo {capture.loc['Modelo: P × CLTV', 'top 20%']:.1%}"
+          f" | IBM {capture.loc['IBM: Churn Score × CLTV', 'top 20%']:.1%}")
+    print(f"  Só P:     modelo {capture.loc['Modelo: só P(churn)', 'top 20%']:.1%}"
+          f" | IBM {capture.loc['IBM: só Churn Score', 'top 20%']:.1%}")
+    print("P vs P × CLTV (modelo de priorização):")
+    print(orderings_compared.round(3).to_string())
     print("Regra de onboarding (clientes novos):")
     print(regra.round(2).to_string())
     print("Ver outputs/figures, outputs/tables, outputs/artifacts e data/processed.")
