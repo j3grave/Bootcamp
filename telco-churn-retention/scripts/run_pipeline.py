@@ -30,6 +30,9 @@ def main() -> None:
 
     df_model, df_joined = features.split_population(df)
     rate = df_model[TARGET].mean()
+    tenure_status = features.tenure_status_table(df)
+    tenure_status.to_csv(TAB_DIR / "02b_tenure_estado.csv")
+    print(tenure_status.to_string(), "\n")
     num, cat, roles = features.feature_roles(df_model)
     roles.to_csv(TAB_DIR / "02_papeis_variaveis.csv", index=False)
     plots.plot_target(df_model[TARGET], show=False)

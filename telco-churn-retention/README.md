@@ -25,6 +25,7 @@ Amostra IBM *Telco Customer Churn*: 7.043 clientes na Califórnia, com um único
 | `Telco_customer_churn_population.xlsx` | 1 linha por ZIP code | `Zip Code` |
 
 - **População de modelação:** clientes `Churned` + `Stayed` (6.589). Os `Joined` (454) ficam fora do modelo core.
+- **Artefacto dos clientes novos:** os Joined têm todos 1–3 meses de casa, por isso dentro de Churned + Stayed todos os clientes com tenure ≤ 3 saíram. Além do modelo core, há um **modelo de priorização** treinado só com tenure > 3, e os clientes novos são tratados por uma **regra de onboarding** (ver `docs/modelling.md`).
 - **Target:** `churn` = 1 se *Churned*, 0 se *Stayed* (taxa de 28,4%).
 - **Avaliação:** holdout estratificado 80/20 ao nível do cliente.
 
@@ -42,7 +43,7 @@ telco-churn-retention/
 ├── notebooks/
 │   ├── 01_preprocessing_eda.ipynb   # EDA e pré-processamento, documentado por secções
 │   ├── 01b_profiling_ydata.ipynb    # relatórios ydata-profiling
-│   └── 02_modelling_eda.ipynb       # modelos, rede neuronal, ensembles, benchmark IBM e priorização
+│   └── 02_modelling_eda.ipynb       # modelos, benchmark IBM, modelo de priorização e decisões de retenção
 ├── docs/
 │   ├── models.md             # como funciona cada modelo, hiperparâmetros e papel no projeto
 │   └── modelling.md          # protocolo de avaliação, métricas, gráficos e decisões
@@ -56,16 +57,19 @@ telco-churn-retention/
 │   ├── profiling.py          # relatórios ydata-profiling com a paleta do projeto
 │   ├── preprocessing.py      # split, ColumnTransformers, exportação
 │   ├── modelling.py          # modelos, tuning em CV, ensembles, métricas, holdout, P(churn) × CLTV
+│   ├── retention.py          # P vs P × CLTV, custo-benefício, ações sugeridas, regra de onboarding
 │   └── model_plots.py        # gráficos da modelação
 ├── scripts/
 │   ├── run_pipeline.py       # pré-processamento e EDA sem notebook
 │   ├── run_profiling.py      # relatórios ydata-profiling
 │   ├── run_modelling.py      # modelação completa sem notebook
 │   └── run_all.py            # corre os três, por ordem
-├── outputs/                  # figuras, tabelas e artefactos (git-ignored)
-├── reports/                  # guia do projeto, status reports, apresentação
+├── outputs/                  # figuras, tabelas, artefactos e profiling (git-ignored)
+├── reports/                  # guia do projeto, status reports (pptx), dicionário de fontes
 ├── .vscode/                  # definições partilhadas do VS Code
-├── requirements.txt
+├── .gitattributes            # nbstripout: remove os outputs dos notebooks em cada commit
+├── requirements.txt          # dependências (versões mínimas)
+├── requirements-lock.txt     # versões exatas usadas para gerar os resultados
 ├── pyproject.toml
 └── README.md
 ```
@@ -74,34 +78,22 @@ telco-churn-retention/
 
 ## Como começar
 
-### 0. Criar o repositório no GitHub (apenas um membro do grupo)
-
-1. No GitHub, criar um repositório **vazio** chamado `telco-churn-retention`, sem README nem .gitignore.
-2. Na pasta deste projeto:
-
-```bash
-git init -b main
-git add .
-git commit -m "Estrutura inicial: pipeline de pré-processamento e EDA"
-git remote add origin https://github.com/<utilizador>/telco-churn-retention.git
-git push -u origin main
-```
-
-3. Em *Settings → Collaborators*, convidar os restantes membros do grupo.
-
 ### 1. Clonar e criar o ambiente
 
+O repositório do grupo é [`j3grave/Bootcamp`](https://github.com/j3grave/Bootcamp); o projeto está na subpasta `telco-churn-retention`.
+
 ```bash
-git clone https://github.com/<organizacao-ou-utilizador>/telco-churn-retention.git
-cd telco-churn-retention
+git clone https://github.com/j3grave/Bootcamp.git
+cd Bootcamp/telco-churn-retention
 
 python -m venv .venv
 # Windows:      .venv\Scripts\activate
 # macOS/Linux:  source .venv/bin/activate
 
-pip install -r requirements.txt
+pip install -r requirements-lock.txt   # mesmas versões com que os resultados foram gerados
+# (ou pip install -r requirements.txt, para as versões mais recentes compatíveis)
 pip install -e .          # opcional: torna `telco_churn` importável em qualquer lado
-nbstripout --install      # limpa outputs dos notebooks em cada commit
+nbstripout --install      # obrigatório uma vez por membro: limpa os outputs dos notebooks em cada commit
 ```
 
 ### 2. Correr o pipeline
@@ -125,10 +117,11 @@ A fase 1 gera:
 
 A fase 2 gera:
 
-- `outputs/tables/10_*` a `15_*`: tuning, métricas em CV, variantes, holdout, importância e captura de valor
-- `outputs/figures/20_*` a `27_*`: comparação dos modelos, métricas por modelo, curvas, matrizes de confusão, rede neuronal e priorização
-- `outputs/artifacts/final_model.joblib`: modelo final treinado, features e métricas
-- `data/processed/prioridade_holdout.csv` e `prioridade_joined.csv`: listas de intervenção
+- `outputs/tables/10_*` a `21_*`: tuning, métricas em CV, variantes, holdout, importância, captura de valor, modelo de priorização, custo-benefício, ações sugeridas e regra de onboarding
+- `outputs/figures/20_*` a `30_*`: comparação dos modelos, métricas por modelo, curvas, matrizes de confusão, rede neuronal, priorização e valor líquido por cenário
+- `outputs/artifacts/final_model.joblib` (modelo core) e `priority_model.joblib` (modelo de priorização, tenure > 3)
+- `data/processed/prioridade_holdout.csv`: lista de intervenção dos clientes estabelecidos do holdout, com a ação sugerida
+- `data/processed/onboarding_joined.csv`: lista de onboarding dos Joined, por segmento
 
 ---
 
@@ -140,7 +133,7 @@ A fase 2 gera:
 | 3 | Validação | Verifica a unicidade das chaves, a igualdade dos IDs e a cobertura do join por ZIP |
 | 4 | União | Faz o merge com `validate="one_to_one"` / `"many_to_one"`, ficando 1 linha por cliente |
 | 5 | Qualidade | Analisa missing e strings vazias e confirma as derivações documentadas |
-| 6 | População e target | Exclui `Joined` e cria o target binário |
+| 6 | População e target | Exclui `Joined`, cria o target binário e documenta o artefacto do tenure ≤ 3 |
 | 7 | Papéis das variáveis | Classifica cada coluna como id, leakage, benchmark, redundante, numérica ou categórica |
 | 8 | Numéricas | Perfil (skew, % zeros, % outliers IQR), distribuições por target, Spearman |
 | 9 | Categóricas | Dicionário de categorias, composição, Stayed vs Churned, Cramér's V |
@@ -161,8 +154,10 @@ Corre depois do notebook 01 (usa `data/processed/` e `preprocessing_config.jobli
 | 6–7 | Variantes | `Satisfaction Score` com e sem; `City` com `TargetEncoder` dentro do Pipeline |
 | 8 | Holdout | Avaliação única no teste, com as nove métricas, lado a lado com o Churn Score IBM |
 | 9 | Interpretação | Permutation importance ao nível das variáveis originais |
-| 10 | Priorização | Lista ordenada por **P(churn) × CLTV** e curva de captura de valor |
-| 11 | Exportação | `final_model.joblib`, `prioridade_holdout.csv`, `prioridade_joined.csv` |
+| 10 | Modelo de priorização | Mesmo protocolo só com tenure > 3; tabela core vs priorização vs IBM no mesmo holdout |
+| 11 | Priorização | Lista por **P(churn) × CLTV**, comparação com só P, custo-benefício por cenários e ações sugeridas (hipóteses) |
+| 12 | Clientes novos | Regra de onboarding para os Joined, em vez de P(churn) |
+| 13 | Exportação | `final_model.joblib`, `priority_model.joblib`, `prioridade_holdout.csv`, `onboarding_joined.csv` |
 
 ---
 
@@ -173,6 +168,9 @@ Corre depois do notebook 01 (usa `data/processed/` e `preprocessing_config.jobli
 | Excluir `Customer Status`, `Churn Label/Value/Category/Reason` | Codificam o resultado ou só existem depois do churn (leakage) |
 | `Churn Score` como **benchmark**, não como feature | É o output do modelo IBM existente (AUC ≈ 0,94 no holdout) |
 | `CLTV` fora das features e mantido nos CSV | É usado na priorização: **P(churn) × CLTV** |
+| Dois modelos: core (todos os tenures) e priorização (tenure > 3) | Dentro de Churned + Stayed, tenure ≤ 3 = churn por construção (os novos que ficam são Joined). O core responde ao enunciado; o de priorização pontua os clientes estabelecidos |
+| Joined sem P(churn); regra de onboarding | O modelo core dar-lhes-ia P ≈ 1 (extrapolação). A regra (contrato e tipo de internet) é uma hipótese a validar com grupo de controlo |
+| Taxa de sucesso e custo por contacto como pressupostos explícitos | Não existem no dataset; ficam numa célula de parâmetros com três cenários e análise de sensibilidade |
 | `Satisfaction Score` fora por defeito | Scores 1–2 dão 100% de churn, o que indica suspeita de leakage. A testar com e sem |
 | Remover `Under 30`, `Senior Citizen`, `Dependents`, `Referred a Friend`, `Total Revenue` | São derivações exatas de outras colunas (verificadas a 100%) |
 | Remover `Country`, `State`, `Lat Long`, `Zip Code`, `City` | São constantes, duplicadas ou de alta cardinalidade |
@@ -214,12 +212,17 @@ Regras do grupo:
 - Não fazer commit de dados processados nem de outputs: cada membro regenera-os localmente.
 - Não editar os ficheiros em `data/raw/`.
 - Novas funções vão para `src/telco_churn/` e os notebooks servem para explorar e narrar.
-- Notebooks numerados por fase: `01_preprocessing_eda`, `02_modelling_eda`, `03_prioritization`.
+- Notebooks numerados por fase: `01_preprocessing_eda`, `01b_profiling_ydata`, `02_modelling_eda` (a priorização está nas secções 10 a 12 do notebook 02).
 - Cada notebook tem um script equivalente em `scripts/`; uma alteração a um modelo faz-se em `src/telco_churn/` e vale para os dois.
 
 ---
 
 ## Equipa
+
+> **Para o grupo confirmar (não alterei nomes nem dados):**
+> - a tabela não aparece formatada no GitHub: falta a linha separadora `|---|---|---|` e as linhas abaixo não usam `|`;
+> - a coluna "Nº aluno" não tem valores próprios (o número aparece só dentro do email);
+> - estão listados três membros: confirmar se o grupo tem mais alguém e se falta uma coluna de papéis.
 
 | Nome | Nº aluno | Email |
 Francisco Monteiro, 20251694@novaims.unl.pt

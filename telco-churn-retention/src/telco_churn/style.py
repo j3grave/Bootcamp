@@ -45,7 +45,7 @@ RC = {
 
 
 def apply_theme() -> None:
-    """Aplica o tema escuro com a paleta do projeto a todos os gráficos."""
+    """Aplica o tema definido em THEME, com a paleta do projeto, a todos os gráficos."""
     sns.set_theme(context="notebook", style="whitegrid" if THEME == "light" else "darkgrid", rc=RC)
     plt.rcParams.update(RC)
 
