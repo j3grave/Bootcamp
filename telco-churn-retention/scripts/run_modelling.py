@@ -27,7 +27,7 @@ import joblib
 import pandas as pd
 from sklearn.inspection import permutation_importance
 
-from telco_churn import features, model_plots, modelling, plots
+from telco_churn import features, model_plots, modelling, plots, retention
 from telco_churn.config import ARTIFACTS_DIR, DATA_PROCESSED, TAB_DIR, ensure_dirs
 from telco_churn.style import apply_theme
 
@@ -203,10 +203,21 @@ def main() -> None:
     prio_test = modelling.priority_list(test_est, p_test_est).merge(
         test_est[["Customer ID", TARGET]], on="Customer ID")
     model_plots.plot_priority_map(prio_test, 200, show=False)
-    p_joined = final_model.predict_proba(joined[FINAL_FEATURES])[:, 1]
-    prio_joined = modelling.priority_list(joined, p_joined)
 
-    # 11 · Exportação
+    # 11 · Clientes novos: regra de onboarding (sem P(churn) para os Joined)
+    merged = pd.read_csv(DATA_PROCESSED / "telco_merged_full.csv", keep_default_na=False,
+                         na_values=[""])
+    novos = merged[~features.is_established(merged)].copy()
+    novos["saiu"] = (novos["Customer Status"] == "Churned").astype(int)
+    novos["onboarding"] = retention.onboarding_segment(novos)
+    regra = novos.groupby("onboarding")["saiu"].agg(clientes="size", taxa_saida="mean")
+    regra["joined_no_segmento"] = novos[novos["Customer Status"] == "Joined"].groupby(
+        "onboarding").size()
+    regra = regra.loc[retention.ONBOARDING_ORDER]
+    regra.to_csv(TAB_DIR / "19_regra_onboarding.csv")
+    onboarding_joined = retention.onboarding_list(joined)
+
+    # 12 · Exportação
     joblib.dump({"model": final_model, "name": BEST, "features": FINAL_FEATURES,
                  "target": TARGET, "best_params": best_params,
                  "holdout": holdout.loc[BEST].to_dict()}, ARTIFACTS_DIR / "final_model.joblib")
@@ -217,9 +228,9 @@ def main() -> None:
                                             "Modelo de priorização: " + BEST_EST)].to_dict()},
                 ARTIFACTS_DIR / "priority_model.joblib")
     prio_test.to_csv(DATA_PROCESSED / "prioridade_holdout.csv", index=False)
-    prio_joined.to_csv(DATA_PROCESSED / "prioridade_joined.csv", index=False)
+    onboarding_joined.to_csv(DATA_PROCESSED / "onboarding_joined.csv", index=False)
 
-    # 12 · Resumo
+    # 13 · Resumo
     ibm = holdout.loc["Churn Score IBM (benchmark)"]
     print("\n=== Resumo ===")
     print(f"Modelo final: {BEST}")
@@ -231,6 +242,8 @@ def main() -> None:
     print(comparison[["clientes", "auc", "pr_auc", "brier"]].round(3).to_string())
     print(f"  Top 20% por P × CLTV capta {capture.loc['Modelo: P × CLTV', 'top 20%']:.1%}"
           f" do CLTV perdido (IBM: {capture.loc['IBM: só Churn Score', 'top 20%']:.1%})")
+    print("Regra de onboarding (clientes novos):")
+    print(regra.round(2).to_string())
     print("Ver outputs/figures, outputs/tables, outputs/artifacts e data/processed.")
 
 
