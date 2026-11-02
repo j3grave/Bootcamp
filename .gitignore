@@ -1,0 +1,3 @@
+# Ficheiros do macOS e do Windows (a pasta do projeto tem o seu próprio .gitignore)
+.DS_Store
+Thumbs.db
