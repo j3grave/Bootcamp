@@ -26,6 +26,12 @@ ADD_ONS = ["Online Security", "Online Backup", "Device Protection Plan", "Premiu
 NEW_NUM = ["n_add_on_services", "avg_hist_charge", "charge_delta"]
 NEW_CAT = ["has_refund"]
 
+# Os Joined têm todos 1 a 3 meses de casa. Um cliente novo que ficou é rotulado Joined (e sai
+# da população core); um cliente novo que saiu é rotulado Churned (e fica). Por isso, dentro de
+# Churned + Stayed, tenure <= 3 significa quase sempre churn: é um efeito da forma como os
+# estados foram definidos, não um padrão de comportamento.
+NEW_CUSTOMER_MAX_TENURE = 3
+
 
 def split_population(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Separa Churned/Stayed (modelação) de Joined (scoring) e cria o target binário."""
@@ -33,6 +39,23 @@ def split_population(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     df_model = df[df["Customer Status"].isin(["Churned", "Stayed"])].copy()
     df_model[TARGET] = (df_model["Customer Status"] == "Churned").astype(int)
     return df_model, df_joined
+
+
+def is_established(df: pd.DataFrame) -> pd.Series:
+    """True para clientes com mais de NEW_CUSTOMER_MAX_TENURE meses de casa."""
+    return df["Tenure in Months"] > NEW_CUSTOMER_MAX_TENURE
+
+
+def tenure_status_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Nº de clientes por faixa de tenure e Customer Status, com a taxa de churn core.
+
+    A taxa usa só Churned e Stayed, como o modelo core. Mostra o artefacto dos clientes novos.
+    """
+    faixa = is_established(df).map({False: f"1–{NEW_CUSTOMER_MAX_TENURE} meses",
+                                     True: f"{NEW_CUSTOMER_MAX_TENURE + 1} ou mais meses"})
+    table = pd.crosstab(faixa.rename("tenure"), df["Customer Status"])
+    table["taxa_churn_core"] = table["Churned"] / (table["Churned"] + table["Stayed"])
+    return table
 
 
 def feature_roles(df: pd.DataFrame) -> tuple[list[str], list[str], pd.DataFrame]:

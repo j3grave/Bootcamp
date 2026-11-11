@@ -338,3 +338,24 @@ def plot_priority_map(prio: pd.DataFrame, top_n: int, name: str = "26_mapa_prior
     ax.set_ylabel("CLTV")
     ax.legend(loc="upper left")
     save_fig(fig, name, show)
+
+
+def plot_net_value(curves: dict, name: str = "30_valor_liquido", show: bool = True):
+    """Valor líquido observado vs nº de clientes contactados, uma linha por cenário.
+
+    curves: {nome do cenário: DataFrame de retention.net_value_curve}. O ponto marca o máximo.
+    """
+    palette = [GREY, BLUE, GREEN]
+    fig, ax = plt.subplots(figsize=(7, 4.2))
+    for (scenario, curve), color in zip(curves.items(), palette):
+        ax.plot(curve["clientes_contactados"], curve["valor_liquido"], color=color, linewidth=1.8,
+                label=scenario)
+        best = curve["valor_liquido"].idxmax()
+        ax.scatter(curve.loc[best, "clientes_contactados"], curve.loc[best, "valor_liquido"],
+                   color=color, s=30, zorder=3)
+    ax.axhline(0, color=INK, linewidth=0.8)
+    ax.set_title("Valor líquido da campanha por cenário — clientes estabelecidos (holdout)")
+    ax.set_xlabel("Clientes contactados (por ordem de P × CLTV)")
+    ax.set_ylabel("Valor salvo − custo (unidade do CLTV)")
+    ax.legend(loc="lower left")
+    save_fig(fig, name, show)

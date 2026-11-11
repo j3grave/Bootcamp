@@ -77,8 +77,14 @@ ENSEMBLES = ["Soft Voting", "Stacking"]
 # bagging, boosting). A árvore isolada e o kNN ficam de fora: são mais fracos e já estão
 # representados, com vantagem, pelas florestas. A escolha é fixa à partida, e não feita a
 # olhar para os resultados, para que a validação cruzada continue a ser um juiz justo.
-ENSEMBLE_MEMBERS = ["Logistic Regression", "Neural Network (MLP)", "Random Forest",
-                    "Extra Trees", "Gradient Boosting"]
+# O sklearn pede um nome curto para cada membro (sem espaços), por isso guardamos os dois.
+ENSEMBLE_MEMBERS = {
+    "Logistic Regression": "lr",
+    "Neural Network (MLP)": "mlp",
+    "Random Forest": "rf",
+    "Extra Trees": "et",
+    "Gradient Boosting": "gb",
+}
 
 # Descrição curta de cada modelo (tabelas do notebook). Detalhe completo em docs/models.md.
 MODEL_INFO = pd.DataFrame([
@@ -139,11 +145,6 @@ def classification_metrics(y, p, threshold: float = THRESHOLD) -> dict:
     }
 
 
-def score_metrics(y, p) -> dict:
-    """Mantida por compatibilidade: as nove métricas (inclui auc, pr_auc e brier)."""
-    return classification_metrics(y, p)
-
-
 def metrics_glossary() -> pd.DataFrame:
     """Tabela com o significado de cada métrica e o sentido em que é melhor."""
     return pd.DataFrame(
@@ -175,12 +176,12 @@ def make_preprocessors(num: list[str], cat: list[str], te: list[str] = ()) -> di
     """Pré-processadores do notebook 01 + TargetEncoder opcional (ex.: City).
 
     O TargetEncoder fica dentro do Pipeline: é ajustado só nos dados de treino de cada fold.
+    Recebe o mesmo StratifiedKFold (CV) do resto do projeto, para dar sempre o mesmo resultado.
     """
     preps = build_preprocessors(num, cat)
     if te:
         for p in preps.values():
-            p.transformers.append(("te", TargetEncoder(target_type="binary",
-                                                       random_state=RANDOM_STATE), list(te)))
+            p.transformers.append(("te", TargetEncoder(target_type="binary", cv=CV), list(te)))
     return preps
 
 
@@ -214,8 +215,9 @@ def build_models(num: list[str], cat: list[str], params: dict, te: list[str] = (
     preps = make_preprocessors(num, cat, te)
     base = {name: _pipeline(preps[kind], clone(clf).set_params(**params.get(name, {})))
             for name, (kind, clf, _) in BASE_MODELS.items()}
-    members = [(n.lower().replace(" ", "_").replace("(", "").replace(")", ""), clone(base[n]))
-               for n in ENSEMBLE_MEMBERS]
+    members = []
+    for name, short_name in ENSEMBLE_MEMBERS.items():
+        members.append((short_name, clone(base[name])))
     ensembles = {
         "Soft Voting": VotingClassifier(members, voting="soft", n_jobs=-1),
         "Stacking": StackingClassifier(members, final_estimator=LogisticRegression(max_iter=1000),
@@ -329,6 +331,21 @@ def holdout_report(probas: dict, y: pd.Series, benchmark: pd.Series) -> pd.DataF
     rows = {name: classification_metrics(y, p) for name, p in probas.items()}
     rows["Churn Score IBM (benchmark)"] = classification_metrics(y, benchmark / 100)
     return pd.DataFrame(rows).T.sort_values("auc", ascending=False)
+
+
+def comparison_table(rows: list) -> pd.DataFrame:
+    """Métricas de vários modelos, cada um no conjunto de clientes indicado.
+
+    rows: lista de (modelo, conjunto, y, P(churn)). Serve para comparar modelos treinados em
+    populações diferentes: só faz sentido comparar linhas com o mesmo conjunto.
+    """
+    table = []
+    for model_name, subset_name, y, p in rows:
+        row = {"modelo": model_name, "conjunto": subset_name,
+               "clientes": len(y), "taxa_churn": np.mean(y)}
+        row.update(classification_metrics(y, p))
+        table.append(row)
+    return pd.DataFrame(table).set_index(["conjunto", "modelo"])
 
 
 # --- Priorização -------------------------------------------------------------------------

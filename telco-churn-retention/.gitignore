@@ -25,6 +25,8 @@ outputs/tables/*
 !outputs/tables/.gitkeep
 outputs/artifacts/*
 !outputs/artifacts/.gitkeep
+outputs/profiling/*
+!outputs/profiling/.gitkeep
 *.joblib
 *.pkl
 
