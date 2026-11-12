@@ -2,6 +2,7 @@
   <img src="https://img.shields.io/badge/NOVA%20IMS-EDSB%202026-000000?style=for-the-badge&labelColor=000000&color=3777FF" alt="EDSB 2026">
   <img src="https://img.shields.io/badge/Projeto%20D-Telco%20Churn-000000?style=for-the-badge&labelColor=000000&color=0EE071" alt="Projeto D">
   <img src="https://img.shields.io/badge/Python-3.10%2B-000000?style=for-the-badge&logo=python&logoColor=0EE071&labelColor=000000&color=3777FF" alt="Python">
+  <a href="https://huggingface.co/spaces/tvf007/EDSBG1TP2"><img src="https://img.shields.io/badge/App-Hugging%20Face-000000?style=for-the-badge&labelColor=000000&color=0EE071" alt="App no Hugging Face"></a>
 </p>
 
 # Telco Customer Churn — Retention Management
@@ -35,7 +36,7 @@ flowchart LR
 | Testes | `tests/` (pytest) | Em cada push/PR (`ci.yml`) e antes de publicar (`deploy-hf.yml`) |
 | Publicação | `scripts/publish_hf.py` | `deploy-hf.yml`: manual ou em push para `main`, **só se a pipeline e os testes passarem** |
 
-**App:** _link do Space a acrescentar depois da primeira publicação_ (`https://huggingface.co/spaces/<conta>/<space>`).
+**App:** <https://huggingface.co/spaces/tvf007/EDSBG1TP2> · **Modelos:** <https://huggingface.co/tvf007/EDSBG1TP2-model> (`priority_model.joblib` para clientes estabelecidos, `final_model.joblib` modelo core)
 
 ---
 
