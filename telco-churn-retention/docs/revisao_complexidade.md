@@ -178,3 +178,14 @@ Leitura honesta dos números:
   num só sítio, usado pelo script e pelo notebook.
 - **`modelling.py` cresceu 35 linhas** com as funções que antes estavam repetidas no script e
   no notebook.
+
+### Código novo das Fases 2 a 5
+
+Depois de acrescentar os contratos de dados (`schemas.py`), o uso do modelo (`scoring.py`), a
+seleção com parcimónia e as referências (`modelling.py`), a app (`app/app.py`) e a publicação
+(`scripts/publish_hf.py`), a medição com `radon cc -s src scripts app` dá **135 funções com
+nota A, 10 com B e nenhuma com C ou pior**. As novas com nota B são `cv_evaluate` (8, ganhou
+o argumento `benchmarks`), `merge_datasets` (7, chama a validação), `_color` (6, cores das
+três referências), `schemas.validate_split` e `schemas.enforce` (6 cada): funções lineares,
+lidas de cima para baixo.
+
