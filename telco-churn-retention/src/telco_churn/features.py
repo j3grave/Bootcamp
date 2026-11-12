@@ -5,6 +5,9 @@ from .config import TARGET
 
 ID_COLS = ["Customer ID"]
 
+# Colunas de negócio guardadas em train/test ao lado das features (não entram no modelo)
+BUSINESS_COLS = ["Customer ID", "CLTV", "Churn Score", "Satisfaction Score"]
+
 # Codificam o resultado ou só existem depois do churn -> nunca entram no modelo
 LEAKAGE_COLS = ["Customer Status", "Churn Label", "Churn Value", "Churn Category", "Churn Reason"]
 

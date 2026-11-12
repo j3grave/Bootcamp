@@ -64,7 +64,7 @@ def main() -> None:
     prep = preprocessing.build_preprocessors(f_num, f_cat)
     prep["trees"].fit(X_tr)
 
-    cols = ["Customer ID", "CLTV", "Churn Score", "Satisfaction Score"] + f_num + f_cat + [TARGET]
+    cols = features.BUSINESS_COLS + f_num + f_cat + [TARGET]
     preprocessing.export_artifacts(
         df_model.loc[i_tr, cols], df_model.loc[i_te, cols], df_joined, df,
         {"preprocessors": prep, "features_num": f_num, "features_cat": f_cat,

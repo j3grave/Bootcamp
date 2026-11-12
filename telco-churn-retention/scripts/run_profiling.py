@@ -23,7 +23,7 @@ def main() -> None:
     num, cat, _ = features.feature_roles(df_model)
     df_model = features.add_features(df_model)
     feats = num + features.NEW_NUM + cat + features.NEW_CAT
-    final_cols = ["Customer ID", "CLTV", "Churn Score", "Satisfaction Score"] + feats + [TARGET]
+    final_cols = features.BUSINESS_COLS + feats + [TARGET]
 
     _, p1 = profiling.profile_dataset(df, "Telco Churn — Base unida (51 colunas)", "01_base_unida",
                                       "União dos 5 ficheiros: 7.043 clientes, antes da catalogação.")
