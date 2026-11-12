@@ -32,7 +32,11 @@ def load_bundle() -> dict:
     repo = os.environ.get("MODEL_REPO")
     if repo:
         from huggingface_hub import hf_hub_download
-        return joblib.load(hf_hub_download(repo_id=repo, filename="final_model.joblib"))
+        # Model repo público: não precisa de token. Se for privado, o deploy cria o secret
+        # HF_TOKEN no Space e ele é usado aqui.
+        path = hf_hub_download(repo_id=repo, filename="final_model.joblib",
+                               token=os.environ.get("HF_TOKEN") or None)
+        return joblib.load(path)
     for path in (HERE / "final_model.joblib", LOCAL_MODEL):   # ao lado da app, ou o do projeto
         if path.exists():
             return joblib.load(path)
@@ -79,6 +83,21 @@ def _customer(values) -> pd.DataFrame:
     return pd.DataFrame([row])[COLUMNS]
 
 
+def _eur(x: float) -> str:
+    """Valor em euros à portuguesa: espaço nos milhares, sem casas decimais (ex.: 4 500 €)."""
+    return f"{x:,.0f} €".replace(",", "\u00a0")
+
+
+def _pct(x: float, decimals: int = 1) -> str:
+    """Percentagem com vírgula decimal (ex.: 4,4%)."""
+    return f"{x:.{decimals}%}".replace(".", ",")
+
+
+def _metrics(m: dict) -> str:
+    return ", ".join(f"{k} {m[c]:.3f}".replace(".", ",")
+                     for k, c in (("AUC", "auc"), ("PR-AUC", "pr_auc"), ("Brier", "brier")))
+
+
 def _segment_text(segment: str) -> str:
     return {"alto": "**alto** — está no top 10% de risco",
             "médio": "**médio** — está entre o top 10% e o top 20% de risco",
@@ -90,8 +109,9 @@ def assess(cltv, discount, months, effectiveness, *values):
     customer = _customer(values)
     p = float(scoring.predict(BUNDLE, customer)[0])
     segment = modelling.risk_segment([p], CUTS)[0]
-    lines = [f"## P(churn) = {p:.1%}", f"Segmento de risco: {_segment_text(segment)}"]
-    if scoring.is_new_customer(customer["Tenure in Months"])[0]:
+    lines = [f"## P(churn) = {_pct(p)}", f"Segmento de risco: {_segment_text(segment)}"]
+    new_customer = bool(scoring.is_new_customer(customer["Tenure in Months"])[0])
+    if new_customer:
         lines.append("⚠️ **Cliente novo (tenure ≤ 3 meses).** No treino, quase todos os clientes "
                      "com tão poucos meses saíram, por um efeito da forma como os estados foram "
                      "registados. Para estes clientes o modelo extrapola: usar a regra de "
@@ -100,18 +120,21 @@ def assess(cltv, discount, months, effectiveness, *values):
     d = scoring.discount_decision(p, float(cltv), float(discount), float(months),
                                   float(effectiveness))
     verdict = "✅ **Oferecer o desconto.**" if d["dar_desconto"] else "❌ **Não oferecer o desconto.**"
+    if new_customer:
+        verdict += " _(indicativo: cliente novo — seguir a regra de onboarding)_"
     decision = (
         f"{verdict}\n\n"
-        f"- Ganho esperado = P(churn) × eficácia × CLTV = {p:.1%} × {effectiveness:.0%} × "
-        f"{cltv:,.0f} € = **{d['ganho_esperado']:,.0f} €**\n"
-        f"- Custo = desconto × meses = {discount:,.0f} € × {months:.0f} = **{d['custo']:,.0f} €**\n"
-        f"- Valor líquido esperado: **{d['valor_liquido']:+,.0f} €**\n\n"
+        f"- Ganho esperado = P(churn) × eficácia × CLTV = {_pct(p)} × {_pct(effectiveness, 0)} × "
+        f"{_eur(cltv)} = **{_eur(d['ganho_esperado'])}**\n"
+        f"- Custo = desconto × meses = {_eur(discount)} × {months:.0f} = **{_eur(d['custo'])}**\n"
+        f"- Valor líquido esperado: **{'+' if d['valor_liquido'] >= 0 else '−'}"
+        f"{_eur(abs(d['valor_liquido']))}**\n\n"
         + ("Em média, o desconto recupera mais valor do que custa." if d["dar_desconto"] else
            "O risco ou o valor do cliente não chegam para pagar o desconto: "
            "procure uma ação mais barata ou reduza o desconto.")
     )
     factors = scoring.local_factors(BUNDLE, customer).assign(
-        efeito_em_P=lambda t: t["efeito_em_P"].map(lambda v: f"{v:+.1%}"))
+        efeito_em_P=lambda t: t["efeito_em_P"].map(lambda v: ("+" if v >= 0 else "−") + _pct(abs(v))))
     factors.columns = ["Variável", "Valor do cliente", "Valor típico", "Efeito em P(churn)"]
     return "\n\n".join(lines), decision, factors
 
@@ -129,7 +152,7 @@ def score_file(file):
     out.to_csv(path, index=False)
     shown = out.head(50).assign(p_churn=lambda t: t["p_churn"].round(3),
                                 perda_esperada=lambda t: t["perda_esperada"].round(0))
-    summary = (f"{len(out):,} clientes pontuados · {int((out['segmento_risco'] == 'alto').sum())} "
+    summary = (f"{len(out)} clientes pontuados · {int((out['segmento_risco'] == 'alto').sum())} "
                f"em risco alto · {int(out['cliente_novo'].sum())} clientes novos (ver aviso).")
     return summary, shown, gr.DownloadButton(value=str(path), visible=True)
 
@@ -153,9 +176,8 @@ h1, h2 {{ color: {BLUE}; }}
 with gr.Blocks(title="Retenção de clientes — Telco") as demo:
     gr.Markdown(
         f"# Retenção de clientes — risco de churn\n"
-        f"Modelo **{BUNDLE['name']}** · holdout: AUC {BUNDLE['holdout']['auc']:.3f}, "
-        f"PR-AUC {BUNDLE['holdout']['pr_auc']:.3f}, Brier {BUNDLE['holdout']['brier']:.3f} "
-        f"(Churn Score IBM: AUC {BUNDLE['benchmark_cv']['auc']:.3f} em CV). "
+        f"Modelo **{BUNDLE['name']}** · holdout: {_metrics(BUNDLE['holdout'])} "
+        f"(Churn Score IBM: {_metrics(BUNDLE['benchmark_holdout'])}). "
         "Dados sintéticos IBM (Telco, Califórnia).")
     with gr.Tab("Cliente individual"):
         inputs = []

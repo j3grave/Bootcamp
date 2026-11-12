@@ -18,7 +18,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"   # igual ao Space (ZeroGPU suporta 3.10 e 3.12)
           cache: pip
           cache-dependency-path: telco-churn-retention/requirements-lock.txt
 

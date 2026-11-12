@@ -80,12 +80,16 @@ def main() -> None:
 
     from huggingface_hub import HfApi
     api = HfApi(token=os.environ["HF_TOKEN"])
-    api.create_repo(args.model_repo, repo_type="model", exist_ok=True)
+    # Público, para o Space descarregar o modelo sem token
+    api.create_repo(args.model_repo, repo_type="model", private=False, exist_ok=True)
     api.upload_folder(folder_path=model_dir, repo_id=args.model_repo, repo_type="model",
                       commit_message=f"Modelo {bundle['name']} (AUC holdout "
                                      f"{bundle['holdout']['auc']:.3f})")
     api.create_repo(args.space, repo_type="space", space_sdk="gradio", exist_ok=True)
     api.add_space_variable(args.space, "MODEL_REPO", args.model_repo)
+    if api.model_info(args.model_repo).private:   # já existia e é privado: o Space precisa de token
+        api.add_space_secret(args.space, "HF_TOKEN", os.environ["HF_TOKEN"])
+        print("Aviso: o Model repo é privado; foi criado o secret HF_TOKEN no Space.")
     api.upload_folder(folder_path=space_dir, repo_id=args.space, repo_type="space",
                       commit_message="Atualiza a app")
     print(f"Modelo: https://huggingface.co/{args.model_repo}")

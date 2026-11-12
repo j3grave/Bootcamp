@@ -5,7 +5,7 @@ colorFrom: blue
 colorTo: green
 sdk: gradio
 sdk_version: 6.31.0
-python_version: "3.13"
+python_version: "3.12"
 app_file: app.py
 pinned: false
 short_description: Risco de churn e decisão de desconto (EDSB 2026, Grupo 1)
