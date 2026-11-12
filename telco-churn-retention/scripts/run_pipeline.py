@@ -59,7 +59,7 @@ def main() -> None:
     df_joined = features.add_features(df_joined)
     f_num, f_cat = num + features.NEW_NUM, cat + features.NEW_CAT
 
-    X_tr, X_te, y_tr, y_te, i_tr, i_te = preprocessing.stratified_split(
+    X_tr, X_te, _, y_te, i_tr, i_te = preprocessing.stratified_split(
         df_model, f_num + f_cat, TARGET)
     prep = preprocessing.build_preprocessors(f_num, f_cat)
     prep["trees"].fit(X_tr)
