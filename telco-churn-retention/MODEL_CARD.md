@@ -83,7 +83,8 @@ Requer `scikit-learn==1.9.1` (a versão com que o artefacto foi gravado).
   desconto usada na app é um pressuposto e deve ser medida com um grupo de controlo.
 - **Dados sintéticos IBM.** Os padrões podem não se transferir para dados reais. É um único
   extrato (Q3), sem datas, por isso não há validação temporal.
-- **Comparação com a IBM.** O Churn Score da IBM é calculado com informação que não
+- **Nos clientes estabelecidos, a IBM ordena melhor.** Com tenure > 3, o modelo de priorização tem AUC 0,899 contra 0,939 do Churn Score IBM, e o intervalo de confiança a 95% da diferença (bootstrap emparelhado) não inclui zero. O modelo é publicado porque dá probabilidades calibradas (Brier 0,097 contra 0,234), necessárias para P(churn) × CLTV, e usa só variáveis conhecidas. **Não substitui o Churn Score como ordenação.** O gate do deploy exige bater a Dummy e a regra de negócio, sobreajuste < 0,05, Brier < IBM e níveis de risco calibrados.
+- **Comparação com a IBM (modelo core, base completa).** O Churn Score da IBM é calculado com informação que não
   conhecemos. Em ROC AUC o modelo está empatado com ele (diferença dentro do desvio-padrão
   entre folds); é melhor em PR AUC e muito mais bem calibrado (Brier).
 - **Importância das variáveis** mostra associação, não causa.

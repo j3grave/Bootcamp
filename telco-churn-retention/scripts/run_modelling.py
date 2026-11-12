@@ -199,6 +199,13 @@ def stage_priority_model(d, n_iter: int, best, p_test):
         TAB_DIR / "16d_limiares_capacidade_estabelecidos_cv.csv")
     modelling.decision_table(y_test_est, p_test_est, thresholds_est).to_csv(
         TAB_DIR / "17b_limiares_capacidade_estabelecidos_holdout.csv")
+    # Reporte: IC 95% da diferença de AUC face ao IBM nos clientes estabelecidos
+    boot_est = modelling.paired_bootstrap_auc_diff(y_test_est, p_test_est,
+                                                   test_est["Churn Score"] / 100)
+    pd.DataFrame([boot_est], index=[f"{best_est} (priorização) − {modelling.BENCHMARK}"]).to_csv(
+        TAB_DIR / "17d_bootstrap_auc_priorizacao_vs_ibm.csv")
+    step(f"Priorização − IBM (tenure > 3): {boot_est['diferenca']:+.4f}, IC 95% "
+         f"[{boot_est['ic_inferior']:+.4f}, {boot_est['ic_superior']:+.4f}]")
     # Os níveis de risco (30% / 60%) também se leem como % real com este modelo (é o da app)
     modelling.risk_level_table(y_test_est, p_test_est).to_csv(
         TAB_DIR / "17c_niveis_risco_estabelecidos_holdout.csv")
@@ -224,6 +231,9 @@ def stage_priority_model(d, n_iter: int, best, p_test):
                   holdout=comparison.loc[("holdout tenure > 3",
                                           "Modelo de priorização: " + best_est)].to_dict(),
                   benchmark_cv=cv_est.loc[modelling.BENCHMARK].to_dict(),
+                  benchmark_holdout=comparison.loc[("holdout tenure > 3",
+                                                    "Churn Score IBM")].to_dict(),
+                  bootstrap_vs_ibm=boot_est,
                   thresholds=thresholds_est, risk_levels=modelling.RISK_LEVELS,
                   capacity_cuts={"top 10%": cuts_est[0.10], "top 20%": cuts_est[0.20]},
                   form=scoring.form_spec(train_est, inputs),

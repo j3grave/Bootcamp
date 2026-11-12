@@ -201,6 +201,34 @@ Em qualquer destes casos, o `deploy-hf.yml` não publica.
 
 O relatório deve dizer "empatado com a IBM em AUC, melhor em PR AUC e em calibração", e não "bate a IBM".
 
+### Gate do modelo de priorização
+
+A app usa o `priority_model.joblib` nos clientes estabelecidos, por isso este modelo também tem um gate antes de publicar. **Não é o mesmo critério do modelo core**, porque aplicar a não inferioridade face à IBM bloquearia a publicação. Nos 1183 clientes estabelecidos do holdout:
+
+| Verificação | Priorização | IBM | Limite | Resultado | Papel |
+|---|---|---|---|---|---|
+| AUC > Dummy (0,5) e > regra de negócio | 0,899 | — | 0,5 / 0,80 | passa | **gate** |
+| Sobreajuste: AUC treino − CV | 0,039 | — | < 0,05 | passa | **gate** |
+| Brier < Brier IBM (calibração) | 0,097 | 0,234 | 0,234 | passa | **gate** |
+| Níveis de risco calibrados (\|churn real − P média\| < 0,10) | 0,02 | — | 0,10 | passa | **gate** |
+| Cortes de capacidade sinalizam ≈ 10% / 20% | 8,4% / 18,0% | — | ± 3 p.p. | passa | **gate** |
+| AUC ≥ AUC IBM − desvio-padrão da IBM | 0,899 | 0,939 | 0,927 | **não passaria** | reporte |
+| PR AUC ≥ PR AUC IBM | 0,726 | 0,831 | 0,831 | **não passaria** | reporte |
+| IC 95% da diferença de AUC (bootstrap emparelhado) | −0,040 | | [−0,063; −0,018] | **não inclui zero** | reporte |
+
+**Decisão do grupo: gate próprio, com a IBM como reporte.** Nos clientes estabelecidos, o Churn Score da IBM **ordena melhor** do que o nosso modelo. A diferença é real: o intervalo de confiança não inclui zero. Mesmo assim, publica-se o modelo de priorização, por três razões:
+
+1. **Calibração.** A priorização por P(churn) × CLTV e a decisão de desconto (P × eficácia × CLTV) precisam de uma probabilidade. O Churn Score / 100 não é uma (Brier 0,234 contra 0,097).
+2. **Variáveis conhecidas.** O modelo usa só variáveis conhecidas antes do churn, com origem documentada. Não se sabe com que informação o Churn Score foi calculado, e pode usar dados posteriores ao churn ou que não temos.
+3. **Bate as baselines.** O modelo bate a Dummy e a regra de negócio, sem sobreajuste.
+
+**A inferioridade em ordenação é declarada, não escondida:**
+- **App:** o cabeçalho diz que o modelo não substitui o Churn Score e mostra as métricas da IBM nos mesmos clientes.
+- **MODEL_CARD:** tem uma linha da IBM nos estabelecidos e o intervalo de confiança.
+- **Tabelas:** `17d_bootstrap_auc_priorizacao_vs_ibm.csv` e `17_comparacao_core_priorizacao.csv`.
+
+**Leitura para o relatório.** O empate do modelo **core** com a IBM na base completa (secção anterior) vem em parte dos clientes novos, que ambos acertam com facilidade. Nos clientes estabelecidos, o core também fica abaixo da IBM (AUC 0,900). A conclusão honesta é: o modelo dá probabilidades calibradas a partir de variáveis conhecidas, mas não ordena os clientes estabelecidos melhor do que o score existente.
+
 ## Limitações e decisões a declarar no relatório
 
 - **Brier e log loss do IBM.** `Churn Score / 100` não é uma probabilidade calibrada, por isso o Brier e o log loss do IBM só servem como referência. A comparação justa com o IBM é pelas métricas de ordenação (ROC AUC, PR AUC) e pela curva de captura.
@@ -253,6 +281,7 @@ O relatório deve dizer "empatado com a IBM em AUC, melhor em PR AUC e em calibr
 | `16_tuning_estabelecidos.csv`, `16b_cv_modelos_estabelecidos.csv`, `16c_selecao_modelo_estabelecidos.csv` | Tuning, CV e seleção do modelo de priorização |
 | `16d_limiares_capacidade_estabelecidos_cv.csv`, `17b_limiares_capacidade_estabelecidos_holdout.csv` | Cortes de capacidade (top 10% / 20%) só com clientes estabelecidos: OOF e holdout |
 | `17c_niveis_risco_estabelecidos_holdout.csv` | Níveis de risco do modelo de priorização nos clientes estabelecidos do holdout |
+| `17d_bootstrap_auc_priorizacao_vs_ibm.csv` | IC 95% (bootstrap emparelhado) da diferença de AUC entre o modelo de priorização e o IBM, tenure > 3 (reporte) |
 | `17_comparacao_core_priorizacao.csv` | Modelo core vs modelo de priorização vs IBM, por conjunto do holdout |
 | `18_importancia_priorizacao.csv` | Queda de AUC por variável no modelo de priorização |
 | `19_regra_onboarding.csv` | Segmentos de onboarding dos clientes novos e taxa de saída |
