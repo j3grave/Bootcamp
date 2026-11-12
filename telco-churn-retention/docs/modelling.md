@@ -101,7 +101,7 @@ As métricas com limiar usam 0,5 por convenção. Com 28% de churn, esse limiar 
 | | Pergunta | Cortes | Onde |
 |---|---|---|---|
 | **Nível de risco** (absoluto) | Quão provável é este cliente sair? | baixo < 30% ≤ médio < 60% ≤ alto | `modelling.RISK_LEVELS`, `risk_level` |
-| **Prioridade de contacto** (relativa) | Cabe na capacidade da equipa? | top 10% da base (P ≥ 0,925) · top 20% (P ≥ 0,640) · fora | `capacity_cuts` no `final_model.joblib`, `contact_priority` |
+| **Prioridade de contacto** (relativa) | Cabe na capacidade da equipa? | top 10% dos clientes estabelecidos (P ≥ 0,696) · top 20% (P ≥ 0,443) · fora | `capacity_cuts` no `priority_model.joblib`, `contact_priority` |
 
 Numa primeira versão havia um só "segmento de risco" definido pelos quantis da capacidade: alto = top 10%, médio = top 10–20%. Era pouco intuitivo, porque o top 10% é ocupado quase só por clientes com P ≈ 1 (sobretudo clientes novos, pelo artefacto do tenure ≤ 3), o que punha o corte do "alto" em 0,925. Um cliente com P = 77% aparecia como risco "médio", e no holdout o "médio" tinha 79% de churn real.
 
@@ -113,7 +113,25 @@ Os níveis absolutos leem-se como percentagens reais porque o modelo está calib
 | médio (30–60%) | 171 | 13% | 44% | 40% |
 | alto (≥ 60%) | 271 | 21% | 89% | 88% |
 
-**Ligação à capacidade.** O corte do risco alto (60%) fica perto do limiar do top 20% (0,64). Por isso quase todos os clientes de risco alto cabem numa campanha que contacte 20% da base. A ordem de contacto do lote continua a ser por P(churn) × CLTV (perda esperada).
+**Na app: clientes estabelecidos e clientes novos em listas separadas.** O separador *Lote* e o *Cliente individual* tratam os dois grupos de forma diferente:
+
+- **Clientes estabelecidos (tenure > 3):** são pontuados pelo **modelo de priorização**. A lista é ordenada por P(churn) × CLTV (perda esperada), com o nível de risco e a prioridade de contacto.
+- **Clientes novos (tenure ≤ 3):** ficam numa **lista à parte**, ordenada por segmento de onboarding e CLTV. A P(churn) do modelo core aparece só como valor indicativo, com o aviso de extrapolação. Estes clientes não entram na prioridade de contacto, porque o modelo de priorização nunca os viu e o core dá-lhes P ≈ 1 pelo artefacto do registo de estados.
+
+**Cortes de capacidade calculados só com clientes estabelecidos.** Os cortes do top 10% e do top 20% são os quantis das previsões out-of-fold do modelo de priorização no treino com tenure > 3. Ficam em `priority_model.joblib` (`capacity_cuts`) e nas tabelas `16d_limiares_capacidade_estabelecidos_cv.csv` e `17b_limiares_capacidade_estabelecidos_holdout.csv`.
+
+Antes, os cortes eram os do modelo core sobre toda a base (0,925 e 0,640). O top 10% ficava cheio de clientes novos com P ≈ 1, e só 1% dos clientes estabelecidos do holdout chegava ao "top 10%" (10% ao "top 20%"). Com os cortes novos:
+
+| Clientes estabelecidos do holdout (1183) | Cortes antigos (core, toda a base) | Cortes novos (priorização, tenure > 3) |
+|---|---|---|
+| % no top 10% | 1,0% | 8,4% |
+| % no top 20% | 10,1% | 18,0% |
+| Precision no top 20% | 82% | 68% |
+| Recall no top 20% (churners apanhados) | 41% | 61% |
+
+A precision desce porque a lista passa a ter o dobro dos clientes. Em troca, a equipa apanha 61% dos churners estabelecidos em vez de 41% com a mesma capacidade, e deixa de gastar contactos com clientes novos que seguem outra regra. A ordem de contacto continua a ser por P(churn) × CLTV.
+
+Os cortes do modelo core sobre toda a base (`capacity_cuts` em `final_model.joblib`, tabelas `11e_*` e `13b_*`) ficam como análise do modelo core e já não são usados na app.
 
 ## Decisões de retenção: o que é dado e o que é pressuposto
 
@@ -225,6 +243,7 @@ O relatório deve dizer "empatado com a IBM em AUC, melhor em PR AUC e em calibr
 | `15_captura_valor.csv` | Captura de valor nos top 10/20/30% (clientes estabelecidos) |
 | `15b_P_vs_PxCLTV.csv` | Lista por P vs lista por P × CLTV: clientes em comum, churners e CLTV cobertos |
 | `16_tuning_estabelecidos.csv`, `16b_cv_modelos_estabelecidos.csv`, `16c_selecao_modelo_estabelecidos.csv` | Tuning, CV e seleção do modelo de priorização |
+| `16d_limiares_capacidade_estabelecidos_cv.csv`, `17b_limiares_capacidade_estabelecidos_holdout.csv` | Cortes de capacidade (top 10% / 20%) só com clientes estabelecidos: OOF e holdout |
 | `17_comparacao_core_priorizacao.csv` | Modelo core vs modelo de priorização vs IBM, por conjunto do holdout |
 | `18_importancia_priorizacao.csv` | Queda de AUC por variável no modelo de priorização |
 | `19_regra_onboarding.csv` | Segmentos de onboarding dos clientes novos e taxa de saída |

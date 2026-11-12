@@ -153,7 +153,7 @@ pytest tests/test_data.py -v             # só os contratos de dados
 |---|---|
 | `tests/test_data.py` | Os ficheiros reais cumprem os contratos; derivações a 100%; merge 1:1; um valor fora do domínio (ex.: `Satisfaction Score = 9`) faz a pipeline parar |
 | `tests/test_preprocessing.py` | Treino e teste disjuntos e estratificados; sem leakage nas features; sem NaN depois do pré-processador; `add_features` calculada linha a linha |
-| `tests/test_model.py` | Sobre `final_model.joblib`, sem retreinar: bate a Dummy e a regra de negócio; não é pior do que o Churn Score IBM (AUC dentro do desvio-padrão da IBM em CV, PR AUC ≥, Brier <); sobreajuste < 0,05; aceita uma linha do formulário e devolve P em [0, 1] |
+| `tests/test_model.py` | Sobre `final_model.joblib` e `priority_model.joblib`, sem retreinar: o lote separa clientes estabelecidos (modelo de priorização) e novos (lista de onboarding); cortes de capacidade sobre tenure > 3; bate a Dummy e a regra de negócio; não é pior do que o Churn Score IBM (AUC dentro do desvio-padrão da IBM em CV, PR AUC ≥, Brier <); sobreajuste < 0,05; aceita uma linha do formulário e devolve P em [0, 1] |
 | `tests/test_app.py` | Decisão do desconto nos casos limite (P = 0, P = 1, custo = 0, eficácia = 0, empate, valores inválidos) |
 
 ### 4. Correr a app localmente
@@ -234,6 +234,7 @@ Corre depois do notebook 01 (usa `data/processed/` e `preprocessing_config.jobli
 | Regra de parcimónia: entre os empatados com o melhor, o mais simples | Com diferenças dentro do ruído, um modelo mais simples é mais fácil de explicar e manter (`COMPLEXITY_ORDER` em `modelling.py`) |
 | Baselines: Dummy, regra de negócio e Churn Score IBM, na CV e no holdout | Mostra quanto o modelo acrescenta face a não fazer nada, a uma regra simples e ao score existente |
 | Contratos de dados com pandera, com duas severidades | Erro pára a pipeline; aviso (estatísticas) regista e continua. Simples e testável com pytest |
+| App: clientes estabelecidos pelo modelo de priorização; clientes novos numa lista à parte | O core dá P ≈ 1 aos clientes com tenure ≤ 3 (artefacto do registo de estados); a capacidade da equipa (top 10% / 20%) é medida só nos clientes estabelecidos |
 | App Gradio com o modelo num Model repo separado | O Space descarrega o modelo (`hf_hub_download`); o pacote `telco_churn` é copiado para o Space no deploy (a opção mais simples: sem publicar o pacote) |
 | Rede neuronal com `MLPClassifier` (scikit-learn) | Encaixa no `Pipeline`, no tuning e nos ensembles sem novas dependências; equivale a Keras para uma rede deste tamanho |
 | Ensembles com LR, MLP, Random Forest, Extra Trees e Gradient Boosting | Membros fortes e de famílias diferentes, fixados antes de ver os resultados |

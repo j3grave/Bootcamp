@@ -13,7 +13,13 @@ tags:
 
 Estimar a probabilidade de um cliente de telecomunicações sair, P(churn), para que a equipa de
 retenção contacte primeiro os clientes com maior **perda esperada = P(churn) × CLTV**.
-O modelo é usado pela app Gradio do projeto (cliente individual e lote).
+O repositório tem dois modelos, ambos usados pela app Gradio do projeto:
+
+- `priority_model.joblib` — **modelo de priorização**, treinado só com clientes estabelecidos
+  (tenure > 3). É o que pontua e ordena os clientes na app (cliente individual e lote).
+- `final_model.joblib` — **modelo core**, treinado com todos os tenures (população do
+  enunciado). É o que se compara com o Churn Score IBM; nos clientes novos (tenure ≤ 3) dá
+  apenas um valor indicativo, porque extrapola.
 
 ## Dados
 
@@ -54,11 +60,14 @@ artefacto no momento da publicação.
 import joblib
 from huggingface_hub import hf_hub_download
 
-bundle = joblib.load(hf_hub_download(repo_id="<conta>/<model-repo>", filename="final_model.joblib"))
+repo = "tvf007/EDSBG1TP2-model"
+priority = joblib.load(hf_hub_download(repo_id=repo, filename="priority_model.joblib"))  # tenure > 3
+core = joblib.load(hf_hub_download(repo_id=repo, filename="final_model.joblib"))
 # bundle["model"]: Pipeline scikit-learn (pré-processador + classificador)
 # bundle["features"]: colunas de entrada (as derivadas calculam-se com telco_churn.features.add_features)
-# bundle["risk_levels"]: níveis de risco absolutos (médio ≥ 0,30, alto ≥ 0,60)
-# bundle["capacity_cuts"]: P(churn) a partir da qual o cliente está no top 10% / 20% da base
+# priority["risk_levels"]: níveis de risco absolutos (médio ≥ 0,30, alto ≥ 0,60)
+# priority["capacity_cuts"]: P(churn) a partir da qual um cliente estabelecido está no
+#                            top 10% / 20% dos clientes estabelecidos
 ```
 
 Requer `scikit-learn==1.9.1` (a versão com que o artefacto foi gravado).

@@ -177,7 +177,8 @@ def stage_priority_model(d, n_iter: int, best, p_test):
     tuning_est.to_csv(TAB_DIR / "16_tuning_estabelecidos.csv")
     models_est = modelling.build_models(d.NUM, d.CAT, best_params_est)
     ibm_est = {modelling.BENCHMARK: train_est["Churn Score"].to_numpy() / 100}
-    cv_est, _ = modelling.cv_evaluate(models_est, X_train_est, y_train_est, benchmarks=ibm_est)
+    cv_est, oof_est = modelling.cv_evaluate(models_est, X_train_est, y_train_est,
+                                            benchmarks=ibm_est)
     cv_est.to_csv(TAB_DIR / "16b_cv_modelos_estabelecidos.csv")
     model_plots.plot_cv_comparison(cv_est, name="28_cv_modelos_estabelecidos",
                                    title="AUC em validação cruzada — clientes estabelecidos (tenure > 3)",
@@ -188,6 +189,16 @@ def stage_priority_model(d, n_iter: int, best, p_test):
 
     priority_model = models_est[best_est].fit(X_train_est, y_train_est)
     p_test_est = priority_model.predict_proba(X_test_est)[:, 1]
+
+    # Capacidade da equipa medida só nos clientes estabelecidos: os clientes novos (P ≈ 1 no
+    # modelo core) já não ocupam o top 10% / 20%. Limiares fixados no OOF, aplicados ao holdout.
+    cuts_est = modelling.capacity_thresholds(oof_est[best_est])
+    thresholds_est = {"0,5 (por omissão)": 0.5,
+                      "capacidade top 10%": cuts_est[0.10], "capacidade top 20%": cuts_est[0.20]}
+    modelling.decision_table(y_train_est, oof_est[best_est], thresholds_est).to_csv(
+        TAB_DIR / "16d_limiares_capacidade_estabelecidos_cv.csv")
+    modelling.decision_table(y_test_est, p_test_est, thresholds_est).to_csv(
+        TAB_DIR / "17b_limiares_capacidade_estabelecidos_holdout.csv")
     y_test = d.test[d.TARGET]
     est_mask = features.is_established(d.test).to_numpy()
     comparison = modelling.comparison_table([
@@ -204,10 +215,16 @@ def stage_priority_model(d, n_iter: int, best, p_test):
     plots.plot_ranking(importance_est.head(20),
                        f"Permutation importance — {best_est} (tenure > 3, holdout)",
                        "29_importancia_priorizacao", highlight=set(d.CAT), show=False)
+    inputs = [c for c in d.FEATURES if c not in features.NEW_NUM + features.NEW_CAT]
     bundle = dict(model=priority_model, name=best_est, best_params=best_params_est,
-                  cv=cv_est.loc[best_est].to_dict(),
+                  cv=cv_est.loc[best_est].to_dict(), selection=reason_est,
                   holdout=comparison.loc[("holdout tenure > 3",
-                                          "Modelo de priorização: " + best_est)].to_dict())
+                                          "Modelo de priorização: " + best_est)].to_dict(),
+                  benchmark_cv=cv_est.loc[modelling.BENCHMARK].to_dict(),
+                  thresholds=thresholds_est, risk_levels=modelling.RISK_LEVELS,
+                  capacity_cuts={"top 10%": cuts_est[0.10], "top 20%": cuts_est[0.20]},
+                  form=scoring.form_spec(train_est, inputs),
+                  cltv_median=float(train_est["CLTV"].median()))
     return test_est, p_test_est, comparison, bundle
 
 

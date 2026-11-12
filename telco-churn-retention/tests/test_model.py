@@ -9,13 +9,15 @@ import pandas as pd
 import pytest
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
-from telco_churn import modelling, scoring
+from telco_churn import modelling, retention, scoring
 from telco_churn.config import ARTIFACTS_DIR, DATA_PROCESSED
 
 MODEL_PATH = ARTIFACTS_DIR / "final_model.joblib"
+PRIORITY_PATH = ARTIFACTS_DIR / "priority_model.joblib"
 MAX_TRAIN_CV_GAP = 0.05   # AUC treino − AUC validação em CV: acima disto, sobreajuste
 
-pytestmark = pytest.mark.skipif(not MODEL_PATH.exists() or not (DATA_PROCESSED / "test.csv").exists(),
+pytestmark = pytest.mark.skipif(not MODEL_PATH.exists() or not PRIORITY_PATH.exists()
+                                or not (DATA_PROCESSED / "test.csv").exists(),
                                 reason="falta o modelo exportado: correr scripts/run_all.py")
 
 
@@ -25,11 +27,22 @@ def bundle():
 
 
 @pytest.fixture(scope="module")
+def priority():
+    return joblib.load(PRIORITY_PATH)
+
+
+@pytest.fixture(scope="module")
 def holdout(bundle):
     train, test, _, _ = modelling.load_processed()
     y = test[bundle["target"]]
     return {"train": train, "test": test, "y": y,
             "p": scoring.predict(bundle, test), "ibm": test["Churn Score"] / 100}
+
+
+def test_artefacto_de_priorizacao_tem_as_chaves_da_app(priority):
+    expected = {"model", "name", "features", "target", "cv", "holdout", "selection",
+                "risk_levels", "capacity_cuts", "form", "cltv_median", "population"}
+    assert expected <= set(priority)
 
 
 def test_artefacto_tem_as_chaves_esperadas(bundle):
@@ -87,14 +100,54 @@ def test_formulario_sem_colunas_derivadas(bundle):
     assert not set(cols) & set(modelling.REFERENCES)
 
 
-def test_lote_ordenado_por_perda_esperada(bundle, holdout):
-    batch = holdout["test"].head(40)
-    out = scoring.score_batch(bundle, batch)
-    assert len(out) == len(batch)
-    assert out["perda_esperada"].is_monotonic_decreasing
-    assert set(out["nivel_risco"]) <= set(modelling.RISK_ORDER)
-    assert set(out["prioridade_contacto"]) <= set(modelling.PRIORITY_ORDER)
-    assert np.allclose(out["perda_esperada"], out["p_churn"] * out["CLTV"])
+def test_lote_separa_estabelecidos_e_novos(bundle, priority, holdout):
+    batch = holdout["test"].head(80)
+    est, new = scoring.score_batch(priority, batch, core_bundle=bundle)
+    tenure = batch.set_index("Customer ID")["Tenure in Months"]
+    assert len(est) + len(new) == len(batch) and len(new) > 0
+    assert (tenure.loc[est["Customer ID"]] > 3).all()
+    assert (tenure.loc[new["Customer ID"]] <= 3).all()
+    # Estabelecidos: modelo de priorização, ordenados por perda esperada
+    p_priority = priority["model"].predict_proba(
+        batch.set_index("Customer ID").loc[est["Customer ID"]][priority["features"]])[:, 1]
+    assert np.allclose(est["p_churn"], p_priority)
+    assert est["perda_esperada"].is_monotonic_decreasing
+    assert np.allclose(est["perda_esperada"], est["p_churn"] * est["CLTV"])
+    assert set(est["nivel_risco"]) <= set(modelling.RISK_ORDER)
+    assert set(est["prioridade_contacto"]) <= set(modelling.PRIORITY_ORDER)
+    # Novos: segmento de onboarding, P só indicativa, sem prioridade de contacto
+    assert set(new["onboarding"]) <= set(retention.ONBOARDING_ORDER)
+    assert "prioridade_contacto" not in new and "p_churn_indicativo" in new
+
+
+def test_lote_pequeno_ou_so_com_novos(bundle, priority, holdout):
+    test = holdout["test"]
+    est, new = scoring.score_batch(priority, test[test["Tenure in Months"] > 3].head(4))
+    assert len(est) == 4 and len(new) == 0 and list(est["decil"]) == [1, 2, 3, 4]
+    est, new = scoring.score_batch(priority, test[test["Tenure in Months"] <= 3].head(5), bundle)
+    assert len(est) == 0 and len(new) == 5
+
+
+def test_modelo_de_priorizacao_bate_a_regra_nos_estabelecidos(priority, holdout):
+    test, train = holdout["test"], holdout["train"]
+    est_te, est_tr = test[test["Tenure in Months"] > 3], train[train["Tenure in Months"] > 3]
+    p = scoring.predict(priority, est_te)
+    rule = modelling.BusinessRuleScore().fit(est_tr, est_tr["churn"])
+    auc = roc_auc_score(est_te["churn"], p)
+    assert auc == pytest.approx(priority["holdout"]["auc"])
+    assert auc > roc_auc_score(est_te["churn"], rule.predict_proba(est_te)[:, 1])
+
+
+def test_capacidade_calculada_so_com_clientes_estabelecidos(bundle, priority, holdout):
+    """Os cortes do lote vêm do modelo de priorização (tenure > 3) e sinalizam cerca de 10% e
+    20% dos clientes estabelecidos; os do modelo core seriam ocupados pelos clientes novos."""
+    test = holdout["test"]
+    est = test[test["Tenure in Months"] > 3]
+    pr = modelling.contact_priority(scoring.predict(priority, est), priority["capacity_cuts"])
+    assert abs((pr == "top 10%").mean() - 0.10) < 0.03
+    assert abs((pr != "fora da capacidade").mean() - 0.20) < 0.03
+    core_pr = modelling.contact_priority(scoring.predict(bundle, est), bundle["capacity_cuts"])
+    assert (core_pr != "fora da capacidade").mean() < (pr != "fora da capacidade").mean()
 
 
 def test_niveis_de_risco_correspondem_ao_churn_observado(holdout):

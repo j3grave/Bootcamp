@@ -554,7 +554,8 @@ def priority_list(df: pd.DataFrame, proba: np.ndarray, id_col: str = "Customer I
     out["perda_esperada"] = out["p_churn"] * out[cltv_col]
     out = out.sort_values("perda_esperada", ascending=False).reset_index(drop=True)
     out["rank"] = np.arange(1, len(out) + 1)
-    out["decil"] = pd.qcut(out["rank"], 10, labels=range(1, 11)).astype(int)
+    # Decil 1 = 10% com maior perda esperada (com menos de 10 clientes, um grupo por cliente)
+    out["decil"] = pd.qcut(out["rank"], min(10, len(out)), labels=False).astype(int) + 1
     return out
 
 

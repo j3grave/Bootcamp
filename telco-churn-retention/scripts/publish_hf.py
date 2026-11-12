@@ -6,7 +6,8 @@ Uso, a partir da raiz do projeto (telco-churn-retention):
     HF_TOKEN=... python scripts/publish_hf.py --model-repo conta/telco-churn-model --space conta/telco-churn-app
     python scripts/publish_hf.py --model-repo conta/m --space conta/s --dry-run   # só prepara
 
-O Space recebe a pasta app/, uma cópia do pacote src/telco_churn (para add_features e
+O Model repo recebe final_model.joblib (modelo core) e priority_model.joblib (clientes
+estabelecidos). O Space recebe a pasta app/, uma cópia do pacote src/telco_churn (para add_features e
 scoring) e um CSV de exemplo para o separador "Lote". A variável MODEL_REPO do Space é
 definida aqui, para a app saber de onde descarregar o modelo.
 """
@@ -27,12 +28,15 @@ from telco_churn import scoring  # noqa: E402
 from telco_churn.config import ARTIFACTS_DIR, DATA_PROCESSED  # noqa: E402
 
 MODEL = ARTIFACTS_DIR / "final_model.joblib"
+PRIORITY_MODEL = ARTIFACTS_DIR / "priority_model.joblib"
 
 
-def metrics_section(bundle: dict) -> str:
+def metrics_section(bundle: dict, priority: dict) -> str:
     """Tabela de métricas desta versão, para o fim do model card."""
-    rows = [("Modelo escolhido: " + bundle["name"], bundle["cv"], bundle["holdout"]),
-            ("Churn Score IBM (benchmark)", bundle["benchmark_cv"], bundle["benchmark_holdout"])]
+    rows = [("Modelo core: " + bundle["name"], bundle["cv"], bundle["holdout"]),
+            ("Churn Score IBM (benchmark)", bundle["benchmark_cv"], bundle["benchmark_holdout"]),
+            ("Modelo de priorização (tenure > 3): " + priority["name"], priority["cv"],
+             priority["holdout"])]
     lines = ["## Métricas desta versão", "",
              f"Seleção: {bundle['selection']}", "",
              "| | AUC CV (± dp) | AUC holdout | PR AUC holdout | Brier holdout |",
@@ -40,11 +44,13 @@ def metrics_section(bundle: dict) -> str:
     for name, cv, hold in rows:
         h = f"{hold['auc']:.3f} | {hold['pr_auc']:.3f} | {hold['brier']:.3f}"
         lines.append(f"| {name} | {cv['auc']:.3f} ± {cv['auc_std']:.3f} | {h} |")
-    lv, cap = bundle["risk_levels"], bundle["capacity_cuts"]
-    lines += ["", f"Nível de risco (absoluto): baixo < {lv['médio']:.0%}, médio "
-                  f"{lv['médio']:.0%}–{lv['alto']:.0%}, alto ≥ {lv['alto']:.0%}. "
-                  f"Prioridade de contacto (capacidade): top 10% da base se P ≥ "
-                  f"{cap['top 10%']:.3f}, top 20% se P ≥ {cap['top 20%']:.3f}."]
+    lv, cap = priority["risk_levels"], priority["capacity_cuts"]
+    lines += ["", "O modelo de priorização é avaliado no holdout com tenure > 3.", "",
+              f"Nível de risco (absoluto): baixo < {lv['médio']:.0%}, médio "
+              f"{lv['médio']:.0%}–{lv['alto']:.0%}, alto ≥ {lv['alto']:.0%}. "
+              f"Prioridade de contacto (capacidade, só clientes estabelecidos, modelo de "
+              f"priorização): top 10% se P ≥ {cap['top 10%']:.3f}, top 20% se P ≥ "
+              f"{cap['top 20%']:.3f}."]
     return "\n".join(lines) + "\n"
 
 
@@ -67,14 +73,15 @@ def main() -> None:
     args = parser.parse_args()
     if not args.model_repo or not args.space:
         sys.exit("Indicar --model-repo e --space (ou HF_MODEL_REPO e HF_SPACE)")
-    bundle = joblib.load(MODEL)
+    bundle, priority = joblib.load(MODEL), joblib.load(PRIORITY_MODEL)
 
     staging = Path(tempfile.mkdtemp(prefix="hf_"))
     model_dir, space_dir = staging / "model", staging / "space"
     model_dir.mkdir()
     shutil.copy(MODEL, model_dir / "final_model.joblib")
+    shutil.copy(PRIORITY_MODEL, model_dir / "priority_model.joblib")
     card = (ROOT / "MODEL_CARD.md").read_text(encoding="utf-8")
-    (model_dir / "README.md").write_text(card + "\n" + metrics_section(bundle), encoding="utf-8")
+    (model_dir / "README.md").write_text(card + "\n" + metrics_section(bundle, priority), encoding="utf-8")
     stage_space(space_dir, bundle)
     print(f"Ficheiros preparados em {staging}")
     if args.dry_run:

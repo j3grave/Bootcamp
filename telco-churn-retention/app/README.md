@@ -17,10 +17,17 @@ App do projeto Telco Customer Churn (EDSB 2026, NOVA IMS, Grupo 1).
 
 - **Cliente individual:** preencher as variáveis do cliente (os valores por omissão são os
   típicos do treino) e obter P(churn), o nível de risco (baixo < 30%, médio 30–60%,
-  alto ≥ 60%), a prioridade de contacto (top 10% / top 20% da base), os principais fatores e a
-  recomendação de desconto.
-- **Lote:** carregar um CSV (ex.: `exemplo_lote.csv`) e descarregar a lista de clientes
-  ordenada por perda esperada = P(churn) × CLTV.
+  alto ≥ 60%), a prioridade de contacto (top 10% / top 20% dos clientes estabelecidos), os
+  principais fatores e a recomendação de desconto.
+- **Lote:** carregar um CSV (ex.: `exemplo_lote.csv`) e descarregar duas listas:
+  - **clientes estabelecidos** (tenure > 3), pontuados pelo modelo de priorização e ordenados
+    por perda esperada = P(churn) × CLTV;
+  - **clientes novos** (tenure ≤ 3), à parte, por segmento de onboarding, com o aviso de que o
+    modelo extrapola nestes clientes.
+
+Clientes com tenure ≤ 3 não entram na prioridade de contacto: no treino, quase todos os
+clientes com tão poucos meses saíram por um efeito do registo dos estados (os novos que ficam
+são *Joined*), por isso a P(churn) deles é uma extrapolação.
 
 **Regra do desconto:** oferecer se P(churn) × eficácia × CLTV > desconto mensal × meses.
 A eficácia é um **pressuposto**: o modelo prevê o risco de saída, não o efeito causal do
