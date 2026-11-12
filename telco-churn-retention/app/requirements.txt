@@ -7,3 +7,4 @@ numpy==2.3.5
 scipy==1.16.3
 joblib==1.6.0
 huggingface_hub==2.4.0
+spaces==0.51.3     # exigido pelo hardware ZeroGPU do Space (a app não usa GPU; ver app.py)
