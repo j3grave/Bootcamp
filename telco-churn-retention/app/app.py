@@ -212,8 +212,11 @@ with gr.Blocks(title="Retenção de clientes — Telco") as demo:
         f"# Retenção de clientes — risco de churn\n"
         f"Clientes estabelecidos (tenure > 3): modelo de priorização **{PRIORITY['name']}**, "
         f"holdout {_metrics(PRIORITY['holdout'])}. Modelo core **{CORE['name']}**: holdout "
-        f"{_metrics(CORE['holdout'])} (Churn Score IBM: {_metrics(CORE['benchmark_holdout'])}). "
-        "Dados sintéticos IBM (Telco, Califórnia).")
+        f"{_metrics(CORE['holdout'])}. Dados sintéticos IBM (Telco, Califórnia).\n\n"
+        f"ℹ️ **Este modelo não substitui o Churn Score da IBM.** Nos clientes estabelecidos, a "
+        f"IBM ordena melhor ({_metrics(PRIORITY['benchmark_holdout'])}). O modelo é usado porque "
+        "dá probabilidades calibradas (Brier mais baixo), necessárias para P(churn) × CLTV e "
+        "para a decisão de desconto, e porque usa só variáveis conhecidas.")
     with gr.Tab("Cliente individual"):
         inputs = []
         with gr.Row():

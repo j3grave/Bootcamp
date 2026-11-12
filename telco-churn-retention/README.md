@@ -2,6 +2,7 @@
   <img src="https://img.shields.io/badge/NOVA%20IMS-EDSB%202026-000000?style=for-the-badge&labelColor=000000&color=3777FF" alt="EDSB 2026">
   <img src="https://img.shields.io/badge/Projeto%20D-Telco%20Churn-000000?style=for-the-badge&labelColor=000000&color=0EE071" alt="Projeto D">
   <img src="https://img.shields.io/badge/Python-3.10%2B-000000?style=for-the-badge&logo=python&logoColor=0EE071&labelColor=000000&color=3777FF" alt="Python">
+  <a href="https://huggingface.co/spaces/tvf007/EDSBG1TP2"><img src="https://img.shields.io/badge/App-Hugging%20Face-000000?style=for-the-badge&labelColor=000000&color=0EE071" alt="App no Hugging Face"></a>
 </p>
 
 # Telco Customer Churn — Retention Management
@@ -35,7 +36,7 @@ flowchart LR
 | Testes | `tests/` (pytest) | Em cada push/PR (`ci.yml`) e antes de publicar (`deploy-hf.yml`) |
 | Publicação | `scripts/publish_hf.py` | `deploy-hf.yml`: manual ou em push para `main`, **só se a pipeline e os testes passarem** |
 
-**App:** _link do Space a acrescentar depois da primeira publicação_ (`https://huggingface.co/spaces/<conta>/<space>`).
+**App:** <https://huggingface.co/spaces/tvf007/EDSBG1TP2> · **Modelos:** <https://huggingface.co/tvf007/EDSBG1TP2-model> (`priority_model.joblib` para clientes estabelecidos, `final_model.joblib` modelo core)
 
 ---
 
@@ -153,7 +154,7 @@ pytest tests/test_data.py -v             # só os contratos de dados
 |---|---|
 | `tests/test_data.py` | Os ficheiros reais cumprem os contratos; derivações a 100%; merge 1:1; um valor fora do domínio (ex.: `Satisfaction Score = 9`) faz a pipeline parar |
 | `tests/test_preprocessing.py` | Treino e teste disjuntos e estratificados; sem leakage nas features; sem NaN depois do pré-processador; `add_features` calculada linha a linha |
-| `tests/test_model.py` | Sobre `final_model.joblib` e `priority_model.joblib`, sem retreinar: o lote separa clientes estabelecidos (modelo de priorização) e novos (lista de onboarding); cortes de capacidade sobre tenure > 3; bate a Dummy e a regra de negócio; não é pior do que o Churn Score IBM (AUC dentro do desvio-padrão da IBM em CV, PR AUC ≥, Brier <); sobreajuste < 0,05; aceita uma linha do formulário e devolve P em [0, 1] |
+| `tests/test_model.py` | Sobre `final_model.joblib` e `priority_model.joblib`, sem retreinar: o lote separa clientes estabelecidos (modelo de priorização) e novos (lista de onboarding); cortes de capacidade sobre tenure > 3; modelo de priorização com gate próprio (bate a Dummy e a regra, sobreajuste < 0,05, Brier < IBM, níveis calibrados; a IBM fica como reporte porque ordena melhor nos estabelecidos); bate a Dummy e a regra de negócio; não é pior do que o Churn Score IBM (AUC dentro do desvio-padrão da IBM em CV, PR AUC ≥, Brier <); sobreajuste < 0,05; aceita uma linha do formulário e devolve P em [0, 1] |
 | `tests/test_app.py` | Decisão do desconto nos casos limite (P = 0, P = 1, custo = 0, eficácia = 0, empate, valores inválidos) |
 
 ### 4. Correr a app localmente

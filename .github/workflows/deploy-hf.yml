@@ -2,8 +2,8 @@
 #
 # Configuração no GitHub (Settings > Secrets and variables > Actions):
 #   secret   HF_TOKEN        token do Hugging Face com permissão de escrita
-#   variable HF_MODEL_REPO   ex.: conta/telco-churn-model  (Model repo com o final_model.joblib)
-#   variable HF_SPACE        ex.: conta/telco-churn-app    (Space com a app Gradio)
+#   variable HF_MODEL_REPO   opcional; por omissão tvf007/EDSBG1TP2-model (Model repo)
+#   variable HF_SPACE        opcional; por omissão tvf007/EDSBG1TP2       (Space com a app)
 name: Deploy Hugging Face
 
 on:
@@ -55,6 +55,8 @@ jobs:
         if: success() && env.TEM_TOKEN_HF == 'true'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_MODEL_REPO: ${{ vars.HF_MODEL_REPO }}
-          HF_SPACE: ${{ vars.HF_SPACE }}
+          # Nomes públicos (não são segredo): usa a variável do repositório se existir, um
+          # secret com o mesmo nome se tiver sido criado assim, e senão o valor do projeto.
+          HF_MODEL_REPO: ${{ vars.HF_MODEL_REPO || secrets.HF_MODEL_REPO || 'tvf007/EDSBG1TP2-model' }}
+          HF_SPACE: ${{ vars.HF_SPACE || secrets.HF_SPACE || 'tvf007/EDSBG1TP2' }}
         run: python scripts/publish_hf.py
