@@ -22,6 +22,9 @@ jobs:
   pipeline-testes-publicacao:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      # Sem o secret HF_TOKEN, a pipeline e os testes correm na mesma, mas não se publica
+      TEM_TOKEN_HF: ${{ secrets.HF_TOKEN != '' }}
     defaults:
       run:
         working-directory: telco-churn-retention
@@ -44,8 +47,12 @@ jobs:
       - name: Testes (incluindo os do modelo exportado)
         run: pytest tests -v
 
+      - name: Aviso — publicação ignorada (falta HF_TOKEN)
+        if: success() && env.TEM_TOKEN_HF != 'true'
+        run: echo "::warning::Testes passaram, mas o secret HF_TOKEN não está definido; nada foi publicado."
+
       - name: Publicar modelo e app
-        if: success()
+        if: success() && env.TEM_TOKEN_HF == 'true'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_MODEL_REPO: ${{ vars.HF_MODEL_REPO }}
