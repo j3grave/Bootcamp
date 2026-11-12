@@ -158,6 +158,15 @@ def plot_overfitting(table: pd.DataFrame, metric: str = "auc", name: str = "23_s
 
 
 # --- Curvas e matrizes -------------------------------------------------------------------
+def _curve_style(model: str, best: str | None, palette: dict) -> dict:
+    """Estilo de uma curva: modelo final a verde e grosso; benchmark IBM a preto e tracejado."""
+    if model == best:
+        return dict(color=GREEN, linewidth=2.6, linestyle="-", zorder=3)
+    if "IBM" in model:
+        return dict(color=INK, linewidth=1.2, linestyle="--", zorder=2)
+    return dict(color=palette[model], linewidth=1.2, linestyle="-", zorder=2)
+
+
 def plot_roc_pr(y, probas: dict, best: str | None = None, name: str = "23b_roc_pr_cv",
                 title: str = "Curvas ROC e Precision-Recall — previsões out-of-fold",
                 show: bool = True):
@@ -171,10 +180,7 @@ def plot_roc_pr(y, probas: dict, best: str | None = None, name: str = "23b_roc_p
         if model == BASELINE:
             continue
         p = np.asarray(p, dtype=float)
-        is_best, is_ibm = model == best, "IBM" in model
-        color = GREEN if is_best else INK if is_ibm else palette[model]
-        kw = dict(color=color, linewidth=2.6 if is_best else 1.2,
-                  linestyle="--" if is_ibm else "-", zorder=3 if is_best else 2)
+        kw = _curve_style(model, best, palette)
         fpr, tpr, _ = roc_curve(y, p)
         prec, rec, _ = precision_recall_curve(y, p)
         axes[0].plot(fpr, tpr, label=f"{model} ({roc_auc_score(y, p):.3f})", **kw)
