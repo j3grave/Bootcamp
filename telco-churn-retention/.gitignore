@@ -40,3 +40,6 @@ Thumbs.db
 !.vscode/settings.json
 !.vscode/extensions.json
 .idea/
+
+# --- Cópia de referência das tabelas (regra 5 das instruções) ------------
+outputs/_referencia/
