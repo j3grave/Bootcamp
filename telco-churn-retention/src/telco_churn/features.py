@@ -60,21 +60,20 @@ def tenure_status_table(df: pd.DataFrame) -> pd.DataFrame:
 
 def feature_roles(df: pd.DataFrame) -> tuple[list[str], list[str], pd.DataFrame]:
     """Devolve (numéricas, categóricas, tabela de papéis)."""
-    exclude = set(ID_COLS + LEAKAGE_COLS + MODEL_DERIVED_COLS + SUSPECT_COLS
-                  + REDUNDANT_COLS + [TARGET])
+    excluded = {
+        "id": ID_COLS,
+        "leakage": LEAKAGE_COLS,
+        "derivada de modelo (benchmark)": MODEL_DERIVED_COLS,
+        "suspeita de leakage": SUSPECT_COLS,
+        "redundante": REDUNDANT_COLS,
+    }
+    exclude = {c for cols in excluded.values() for c in cols} | {TARGET}
     num = [c for c in df.select_dtypes(include="number").columns if c not in exclude]
     cat = [c for c in df.columns if c not in exclude and c not in num]
-    roles = pd.DataFrame(
-        [(c, "id") for c in ID_COLS]
-        + [(c, "leakage") for c in LEAKAGE_COLS]
-        + [(c, "derivada de modelo (benchmark)") for c in MODEL_DERIVED_COLS]
-        + [(c, "suspeita de leakage") for c in SUSPECT_COLS]
-        + [(c, "redundante") for c in REDUNDANT_COLS]
-        + [(c, "numérica") for c in num]
-        + [(c, "categórica") for c in cat],
-        columns=["variavel", "papel"],
-    )
-    return num, cat, roles
+    roles = excluded | {"numérica": num, "categórica": cat}
+    table = pd.DataFrame([(c, papel) for papel, cols in roles.items() for c in cols],
+                         columns=["variavel", "papel"])
+    return num, cat, table
 
 
 def add_features(data: pd.DataFrame) -> pd.DataFrame:
