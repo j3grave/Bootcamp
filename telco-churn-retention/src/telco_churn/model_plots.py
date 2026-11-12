@@ -17,7 +17,8 @@ from matplotlib.ticker import PercentFormatter
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import confusion_matrix, precision_recall_curve, roc_auc_score, roc_curve
 
-from .modelling import BASELINE, ENSEMBLES, LOWER_IS_BETTER, METRICS
+from .modelling import (BASELINE, ENSEMBLES, LOWER_IS_BETTER, METRICS, THRESHOLD_GRID,
+                        threshold_table)
 from .style import BG, BLUE, GREEN, GREY, GRID, INK, save_fig
 
 LIGHT_BLUE = "#AFC8FF"
@@ -233,18 +234,14 @@ def plot_confusion_matrices(y, probas: dict, threshold: float = 0.5, ncols: int 
 def plot_threshold(y, p, model: str, marker: float | None = None,
                    name: str = "23d_limiar_modelo_final", show: bool = True):
     """Precision, recall, F1 e % de clientes sinalizados em função do limiar de decisão."""
-    from sklearn.metrics import f1_score, precision_score, recall_score
-    y, p = np.asarray(y), np.asarray(p)
-    grid = np.linspace(0.05, 0.95, 91)
-    prec = [precision_score(y, p >= t, zero_division=0) for t in grid]
-    rec = [recall_score(y, p >= t) for t in grid]
-    f1 = [f1_score(y, p >= t, zero_division=0) for t in grid]
-    flagged = [(p >= t).mean() for t in grid]
+    grid = THRESHOLD_GRID
+    t = threshold_table(y, p, grid)
     fig, ax = plt.subplots(figsize=(8, 4.2))
-    ax.plot(grid, prec, color=BLUE, linewidth=2, label="precision")
-    ax.plot(grid, rec, color=GREEN, linewidth=2, label="recall")
-    ax.plot(grid, f1, color=INK, linewidth=2, label="F1")
-    ax.plot(grid, flagged, color=GREY, linewidth=1.5, linestyle=":", label="% clientes sinalizados")
+    ax.plot(grid, t["precision"], color=BLUE, linewidth=2, label="precision")
+    ax.plot(grid, t["recall"], color=GREEN, linewidth=2, label="recall")
+    ax.plot(grid, t["f1"], color=INK, linewidth=2, label="F1")
+    ax.plot(grid, t["pct_sinalizados"], color=GREY, linewidth=1.5, linestyle=":",
+            label="% clientes sinalizados")
     if marker is not None:
         ax.axvline(marker, color=INK, linestyle="--", linewidth=1)
         ax.text(marker, 1.01, f" limiar {marker:.2f}", color=INK, fontsize=8)

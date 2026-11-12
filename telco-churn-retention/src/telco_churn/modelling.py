@@ -34,6 +34,7 @@ from .preprocessing import build_preprocessors
 
 CV = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
 THRESHOLD = 0.5   # limiar por omissão das métricas que precisam de uma decisão sim/não
+THRESHOLD_GRID = np.linspace(0.05, 0.95, 91)   # limiares testados nas curvas e no melhor F1
 
 # --- Modelos ----------------------------------------------------------------------------
 # Modelos base: (pré-processador, estimador, espaço de procura do RandomizedSearchCV)
@@ -320,9 +321,8 @@ def threshold_table(y, p, thresholds=(0.2, 0.3, 0.4, 0.5, 0.6)) -> pd.DataFrame:
 
 def best_f1_threshold(y, p) -> float:
     """Limiar que maximiza o F1 (referência; a escolha final depende dos custos de negócio)."""
-    grid = np.linspace(0.05, 0.95, 91)
-    f1 = [metrics.f1_score(y, np.asarray(p) >= t, zero_division=0) for t in grid]
-    return float(grid[int(np.argmax(f1))])
+    f1 = threshold_table(y, p, THRESHOLD_GRID)["f1"].to_numpy()
+    return float(THRESHOLD_GRID[int(np.argmax(f1))])
 
 
 # --- Avaliação final -------------------------------------------------------------------
