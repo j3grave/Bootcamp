@@ -2,7 +2,7 @@
 
 Dois separadores:
   • Cliente individual — formulário com as variáveis originais do modelo; devolve P(churn),
-    segmento de risco, principais fatores do cliente e a recomendação de desconto.
+    nível de risco, prioridade de contacto, principais fatores e a recomendação de desconto.
   • Lote — upload de um CSV; devolve a lista ordenada por P(churn) × CLTV, para descarregar.
 
 Modelo: final_model.joblib. No Hugging Face é descarregado do Model repo indicado na variável
@@ -46,7 +46,8 @@ def load_bundle() -> dict:
 BUNDLE = load_bundle()
 FORM = BUNDLE["form"]
 COLUMNS = list(FORM)
-CUTS = BUNDLE["risk_cuts"]
+RISK_LEVELS = BUNDLE["risk_levels"]
+CAPACITY_CUTS = BUNDLE["capacity_cuts"]
 
 # Ordem e grupos do formulário (as variáveis que não estão aqui vão para "Outros")
 GROUPS = {
@@ -98,18 +99,28 @@ def _metrics(m: dict) -> str:
                      for k, c in (("AUC", "auc"), ("PR-AUC", "pr_auc"), ("Brier", "brier")))
 
 
-def _segment_text(segment: str) -> str:
-    return {"alto": "**alto** — está no top 10% de risco",
-            "médio": "**médio** — está entre o top 10% e o top 20% de risco",
-            "baixo": "**baixo** — fora do top 20% de risco"}[segment]
+def _risk_text(level: str) -> str:
+    lo, hi = _pct(RISK_LEVELS["médio"], 0), _pct(RISK_LEVELS["alto"], 0)
+    return {"alto": f"**alto** (P ≥ {hi})", "médio": f"**médio** (P entre {lo} e {hi})",
+            "baixo": f"**baixo** (P < {lo})"}[level]
+
+
+def _priority_text(priority: str) -> str:
+    return {"top 10%": "**top 10% da base** — dentro da capacidade, mesmo com só 10% de contactos",
+            "top 20%": "**top 20% da base** — dentro da capacidade se a equipa contactar 20%",
+            "fora da capacidade": "**fora do top 20%** — só com capacidade acima de 20% da base"
+            }[priority]
 
 
 def assess(cltv, discount, months, effectiveness, *values):
     """Separador 'Cliente individual': risco, fatores e decisão de desconto."""
     customer = _customer(values)
     p = float(scoring.predict(BUNDLE, customer)[0])
-    segment = modelling.risk_segment([p], CUTS)[0]
-    lines = [f"## P(churn) = {_pct(p)}", f"Segmento de risco: {_segment_text(segment)}"]
+    level = modelling.risk_level([p], RISK_LEVELS)[0]
+    priority = modelling.contact_priority([p], CAPACITY_CUTS)[0]
+    lines = [f"## P(churn) = {_pct(p)}",
+             f"Nível de risco: {_risk_text(level)}",
+             f"Prioridade de contacto: {_priority_text(priority)}"]
     new_customer = bool(scoring.is_new_customer(customer["Tenure in Months"])[0])
     if new_customer:
         lines.append("⚠️ **Cliente novo (tenure ≤ 3 meses).** No treino, quase todos os clientes "
@@ -152,8 +163,10 @@ def score_file(file):
     out.to_csv(path, index=False)
     shown = out.head(50).assign(p_churn=lambda t: t["p_churn"].round(3),
                                 perda_esperada=lambda t: t["perda_esperada"].round(0))
-    summary = (f"{len(out)} clientes pontuados · {int((out['segmento_risco'] == 'alto').sum())} "
-               f"em risco alto · {int(out['cliente_novo'].sum())} clientes novos (ver aviso).")
+    summary = (f"{len(out)} clientes pontuados · {int((out['nivel_risco'] == 'alto').sum())} "
+               f"com risco alto (P ≥ {_pct(RISK_LEVELS['alto'], 0)}) · "
+               f"{int((out['prioridade_contacto'] != 'fora da capacidade').sum())} no top 20% "
+               f"de prioridade · {int(out['cliente_novo'].sum())} clientes novos (ver aviso).")
     return summary, shown, gr.DownloadButton(value=str(path), visible=True)
 
 
@@ -213,8 +226,9 @@ with gr.Blocks(title="Retenção de clientes — Telco") as demo:
         gr.Markdown(
             "Carregue um CSV com uma linha por cliente e as colunas `Customer ID`, `CLTV` e as "
             f"{len(COLUMNS)} variáveis do formulário (por exemplo, `data/processed/test.csv`). "
-            "Devolve a lista ordenada por **perda esperada = P(churn) × CLTV**, com o segmento "
-            "de risco e o aviso de cliente novo.")
+            "Devolve a lista ordenada por **perda esperada = P(churn) × CLTV**, com o nível de "
+            "risco (baixo < 30%, médio 30–60%, alto ≥ 60%), a prioridade de contacto (top 10% / "
+            "top 20% da base) e o aviso de cliente novo.")
         upload = gr.File(label="CSV de clientes", file_types=[".csv"])
         go = gr.Button("Pontuar lote", variant="primary")
         summary = gr.Markdown()

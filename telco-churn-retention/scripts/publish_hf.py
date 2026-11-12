@@ -40,9 +40,11 @@ def metrics_section(bundle: dict) -> str:
     for name, cv, hold in rows:
         h = f"{hold['auc']:.3f} | {hold['pr_auc']:.3f} | {hold['brier']:.3f}"
         lines.append(f"| {name} | {cv['auc']:.3f} ± {cv['auc_std']:.3f} | {h} |")
-    cuts = bundle["risk_cuts"]
-    lines += ["", f"Segmentos de risco: alto se P(churn) ≥ {cuts['alto']:.3f} (top 10%), "
-                  f"médio se ≥ {cuts['médio']:.3f} (top 20%)."]
+    lv, cap = bundle["risk_levels"], bundle["capacity_cuts"]
+    lines += ["", f"Nível de risco (absoluto): baixo < {lv['médio']:.0%}, médio "
+                  f"{lv['médio']:.0%}–{lv['alto']:.0%}, alto ≥ {lv['alto']:.0%}. "
+                  f"Prioridade de contacto (capacidade): top 10% da base se P ≥ "
+                  f"{cap['top 10%']:.3f}, top 20% se P ≥ {cap['top 20%']:.3f}."]
     return "\n".join(lines) + "\n"
 
 

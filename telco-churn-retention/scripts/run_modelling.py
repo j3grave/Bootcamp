@@ -140,6 +140,8 @@ def stage_holdout(d, models, best, model_sat, city_model, use_city, thresholds):
     # Os mesmos limiares, fixados na CV, aplicados uma vez ao holdout
     modelling.decision_table(y_test, p_test, thresholds).to_csv(
         TAB_DIR / "13b_limiares_negocio_holdout.csv")
+    # Níveis de risco absolutos (30% / 60%): a taxa de churn real confirma a leitura de P
+    modelling.risk_level_table(y_test, p_test).to_csv(TAB_DIR / "13c_niveis_risco_holdout.csv")
     model_plots.plot_roc_calibration(y_test, {
         best: p_test, "Churn Score IBM": d.test["Churn Score"] / 100,
         "Logistic Regression": probas["Logistic Regression"],
@@ -323,8 +325,9 @@ def main() -> None:
                                                            + features.NEW_CAT]),
                           cltv_median=float(d.train["CLTV"].median()),
                           thresholds=thresholds,
-                          risk_cuts={"alto": thresholds["capacidade top 10%"],
-                                     "médio": thresholds["capacidade top 20%"]})
+                          risk_levels=modelling.RISK_LEVELS,
+                          capacity_cuts={"top 10%": thresholds["capacidade top 10%"],
+                                         "top 20%": thresholds["capacidade top 20%"]})
     modelling.save_bundle(ARTIFACTS_DIR / "priority_model.joblib", features=d.FEATURES,
                           target=d.TARGET, population="Churned + Stayed com tenure > 3",
                           **priority_bundle)

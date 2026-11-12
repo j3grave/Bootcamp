@@ -16,7 +16,8 @@ short_description: Risco de churn e decisão de desconto (EDSB 2026, Grupo 1)
 App do projeto Telco Customer Churn (EDSB 2026, NOVA IMS, Grupo 1).
 
 - **Cliente individual:** preencher as variáveis do cliente (os valores por omissão são os
-  típicos do treino) e obter P(churn), o segmento de risco, os principais fatores e a
+  típicos do treino) e obter P(churn), o nível de risco (baixo < 30%, médio 30–60%,
+  alto ≥ 60%), a prioridade de contacto (top 10% / top 20% da base), os principais fatores e a
   recomendação de desconto.
 - **Lote:** carregar um CSV (ex.: `exemplo_lote.csv`) e descarregar a lista de clientes
   ordenada por perda esperada = P(churn) × CLTV.

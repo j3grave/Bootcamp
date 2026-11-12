@@ -57,7 +57,8 @@ from huggingface_hub import hf_hub_download
 bundle = joblib.load(hf_hub_download(repo_id="<conta>/<model-repo>", filename="final_model.joblib"))
 # bundle["model"]: Pipeline scikit-learn (pré-processador + classificador)
 # bundle["features"]: colunas de entrada (as derivadas calculam-se com telco_churn.features.add_features)
-# bundle["risk_cuts"]: cortes de P(churn) para os segmentos alto (top 10%) e médio (top 20%)
+# bundle["risk_levels"]: níveis de risco absolutos (médio ≥ 0,30, alto ≥ 0,60)
+# bundle["capacity_cuts"]: P(churn) a partir da qual o cliente está no top 10% / 20% da base
 ```
 
 Requer `scikit-learn==1.9.1` (a versão com que o artefacto foi gravado).

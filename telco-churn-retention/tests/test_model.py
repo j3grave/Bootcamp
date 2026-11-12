@@ -34,7 +34,8 @@ def holdout(bundle):
 
 def test_artefacto_tem_as_chaves_esperadas(bundle):
     expected = {"model", "name", "features", "target", "best_params", "cv", "holdout",
-                "selection", "thresholds", "risk_cuts", "benchmark_cv", "benchmark_holdout",
+                "selection", "thresholds", "risk_levels", "capacity_cuts", "benchmark_cv",
+                "benchmark_holdout",
                 "form", "cltv_median"}
     assert expected <= set(bundle)
 
@@ -91,8 +92,26 @@ def test_lote_ordenado_por_perda_esperada(bundle, holdout):
     out = scoring.score_batch(bundle, batch)
     assert len(out) == len(batch)
     assert out["perda_esperada"].is_monotonic_decreasing
-    assert set(out["segmento_risco"]) <= {"baixo", "médio", "alto"}
+    assert set(out["nivel_risco"]) <= set(modelling.RISK_ORDER)
+    assert set(out["prioridade_contacto"]) <= set(modelling.PRIORITY_ORDER)
     assert np.allclose(out["perda_esperada"], out["p_churn"] * out["CLTV"])
+
+
+def test_niveis_de_risco_correspondem_ao_churn_observado(holdout):
+    """O modelo está calibrado: a taxa de churn real cresce de nível para nível e fica perto
+    de P (um cliente com P = 77% é 'alto', não 'médio')."""
+    t = modelling.risk_level_table(holdout["y"], holdout["p"])
+    assert t["churn_real"].is_monotonic_increasing
+    assert (t["churn_real"] - t["p_media"]).abs().max() < 0.10
+    assert modelling.risk_level([0.77])[0] == "alto"
+    assert list(modelling.risk_level([0.29, 0.30, 0.59, 0.60])) == ["baixo", "médio", "médio", "alto"]
+
+
+def test_prioridade_de_contacto_respeita_a_capacidade(bundle, holdout):
+    """Os cortes de capacidade sinalizam cerca de 10% e 20% dos clientes do holdout."""
+    pr = modelling.contact_priority(holdout["p"], bundle["capacity_cuts"])
+    assert abs((pr == "top 10%").mean() - 0.10) < 0.03
+    assert abs((pr != "fora da capacidade").mean() - 0.20) < 0.03
 
 
 def test_lote_sem_coluna_obrigatoria_da_erro_claro(bundle, holdout):

@@ -94,7 +94,26 @@ A equipa de retenção não vai contactar "todos os clientes com P > 0,5". Vai c
 
 As métricas com limiar usam 0,5 por convenção. Com 28% de churn, esse limiar tende a deixar escapar churners: dá uma precision alta e um recall mais baixo. A secção 4 mostra, para o modelo final, como precision, recall e F1 mudam com o limiar (tabela `11b_limiares_modelo_final.csv` e gráfico `23d_limiar_modelo_final.png`), e indica o limiar que maximiza o F1 como referência. A escolha final deve vir do negócio, comparando o custo de uma ação de retenção com o valor de um cliente perdido, e não da maximização de uma métrica.
 
-**Limiares de negócio (capacidade da equipa).** A equipa de retenção só consegue contactar uma fração da base. Por isso há, além de 0,5 e do melhor F1, dois limiares definidos pela capacidade: o valor de P(churn) que sinaliza exatamente os **top 10%** e os **top 20%** dos clientes (`capacity_thresholds`). Os quatro limiares são fixados nas previsões out-of-fold do treino (`11e_limiares_negocio_cv.csv`) e aplicados uma vez ao holdout (`13b_limiares_negocio_holdout.csv`), com precision, recall e F1 em cada corte. Os mesmos cortes definem os **segmentos de risco** usados na app: *alto* = top 10%, *médio* = top 10–20%, *baixo* = restantes (`risk_segment`; guardados no `final_model.joblib` em `risk_cuts`).
+**Limiares de negócio (capacidade da equipa).** A equipa de retenção só consegue contactar uma fração da base. Por isso há, além de 0,5 e do melhor F1, dois limiares definidos pela capacidade: o valor de P(churn) que sinaliza exatamente os **top 10%** e os **top 20%** dos clientes (`capacity_thresholds`). Os quatro limiares são fixados nas previsões out-of-fold do treino (`11e_limiares_negocio_cv.csv`) e aplicados uma vez ao holdout (`13b_limiares_negocio_holdout.csv`), com precision, recall e F1 em cada corte.
+
+**Nível de risco e prioridade de contacto: duas leituras de P(churn).** A app e o lote mostram as duas lado a lado, porque respondem a perguntas diferentes:
+
+| | Pergunta | Cortes | Onde |
+|---|---|---|---|
+| **Nível de risco** (absoluto) | Quão provável é este cliente sair? | baixo < 30% ≤ médio < 60% ≤ alto | `modelling.RISK_LEVELS`, `risk_level` |
+| **Prioridade de contacto** (relativa) | Cabe na capacidade da equipa? | top 10% da base (P ≥ 0,925) · top 20% (P ≥ 0,640) · fora | `capacity_cuts` no `final_model.joblib`, `contact_priority` |
+
+Numa primeira versão havia um só "segmento de risco" definido pelos quantis da capacidade: alto = top 10%, médio = top 10–20%. Era pouco intuitivo, porque o top 10% é ocupado quase só por clientes com P ≈ 1 (sobretudo clientes novos, pelo artefacto do tenure ≤ 3), o que punha o corte do "alto" em 0,925. Um cliente com P = 77% aparecia como risco "médio", e no holdout o "médio" tinha 79% de churn real.
+
+Os níveis absolutos leem-se como percentagens reais porque o modelo está calibrado (Brier 0,087). No holdout (`13c_niveis_risco_holdout.csv`):
+
+| Nível | Clientes | % da base | P média | Churn real |
+|---|---|---|---|---|
+| baixo (< 30%) | 876 | 66% | 7% | 8% |
+| médio (30–60%) | 171 | 13% | 44% | 40% |
+| alto (≥ 60%) | 271 | 21% | 89% | 88% |
+
+**Ligação à capacidade.** O corte do risco alto (60%) fica perto do limiar do top 20% (0,64). Por isso quase todos os clientes de risco alto cabem numa campanha que contacte 20% da base. A ordem de contacto do lote continua a ser por P(churn) × CLTV (perda esperada).
 
 ## Decisões de retenção: o que é dado e o que é pressuposto
 
@@ -185,6 +204,7 @@ O relatório deve dizer "empatado com a IBM em AUC, melhor em PR AUC e em calibr
 | `12_variantes_satisfaction_city.csv` | Efeito do Satisfaction Score e de City |
 | `13_holdout.csv` | Nove métricas no holdout, para todos os modelos e para as referências |
 | `13b_limiares_negocio_holdout.csv` | Os mesmos quatro limiares, aplicados ao holdout |
+| `13c_niveis_risco_holdout.csv` | Clientes, P média e churn real por nível de risco (baixo/médio/alto) |
 | `14_importancia_permutacao.csv` | Queda de AUC por variável |
 | `15_captura_valor.csv` | Captura de valor nos top 10/20/30% (clientes estabelecidos) |
 | `15b_P_vs_PxCLTV.csv` | Lista por P vs lista por P × CLTV: clientes em comum, churners e CLTV cobertos |

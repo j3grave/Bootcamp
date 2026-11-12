@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from .features import NEW_CAT, NEW_CUSTOMER_MAX_TENURE, NEW_NUM, add_features
-from .modelling import priority_list, risk_segment
+from .modelling import contact_priority, priority_list, risk_level
 
 ID_COL, CLTV_COL = "Customer ID", "CLTV"
 
@@ -107,7 +107,8 @@ def local_factors(bundle: dict, customer: pd.DataFrame, top: int = 5) -> pd.Data
 def score_batch(bundle: dict, customers: pd.DataFrame) -> pd.DataFrame:
     """Lista de prioridade de um lote: ordenada por perda esperada = P(churn) × CLTV.
 
-    Acrescenta o segmento de risco e um aviso para clientes novos (tenure baixo).
+    Acrescenta o nível de risco (absoluto), a prioridade de contacto (capacidade da equipa)
+    e um aviso para clientes novos (tenure baixo).
     """
     for col in (ID_COL, CLTV_COL):
         if col not in customers.columns:
@@ -116,6 +117,7 @@ def score_batch(bundle: dict, customers: pd.DataFrame) -> pd.DataFrame:
     p = predict(bundle, customers)
     out = priority_list(customers, p)
     extra = customers.set_index(ID_COL).loc[out[ID_COL]]
-    out["segmento_risco"] = risk_segment(out["p_churn"], bundle["risk_cuts"])
+    out["nivel_risco"] = risk_level(out["p_churn"], bundle["risk_levels"])
+    out["prioridade_contacto"] = contact_priority(out["p_churn"], bundle["capacity_cuts"])
     out["cliente_novo"] = is_new_customer(extra["Tenure in Months"].to_numpy())
     return out

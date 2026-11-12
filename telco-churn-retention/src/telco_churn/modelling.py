@@ -420,13 +420,40 @@ def decision_table(y, p, thresholds: dict) -> pd.DataFrame:
     return t.reset_index().set_index("criterio")
 
 
-def risk_segment(p, cuts: dict) -> np.ndarray:
-    """Segmento de risco: 'alto' acima do corte do top 10%, 'médio' até ao top 20%, 'baixo'.
+# Duas leituras diferentes de P(churn), mostradas lado a lado na app e no lote:
+#   nível de risco      -> absoluto: "quão provável é sair?" (o modelo está calibrado, por isso
+#                          P ≈ taxa de churn observada; ver 13c_niveis_risco_holdout.csv)
+#   prioridade contacto -> relativo: "cabe na capacidade da equipa?" (top 10% / 20% da base)
+RISK_LEVELS = {"médio": 0.30, "alto": 0.60}   # baixo < 30% ≤ médio < 60% ≤ alto
+RISK_ORDER = ["baixo", "médio", "alto"]
+PRIORITY_ORDER = ["top 10%", "top 20%", "fora da capacidade"]
 
-    cuts: {"alto": limiar, "médio": limiar}, guardados no final_model.joblib (risk_cuts).
-    """
+
+def risk_level(p, cuts: dict = RISK_LEVELS) -> np.ndarray:
+    """Nível de risco absoluto: baixo (< 30%), médio (30–60%) ou alto (≥ 60%)."""
     p = np.asarray(p, dtype=float)
     return np.select([p >= cuts["alto"], p >= cuts["médio"]], ["alto", "médio"], default="baixo")
+
+
+def contact_priority(p, capacity_cuts: dict) -> np.ndarray:
+    """Prioridade de contacto pela capacidade da equipa: 'top 10%', 'top 20%' da base ou fora.
+
+    capacity_cuts: {"top 10%": limiar, "top 20%": limiar}, os quantis de P(churn) fixados nas
+    previsões out-of-fold do treino (capacity_thresholds), guardados no final_model.joblib.
+    """
+    p = np.asarray(p, dtype=float)
+    return np.select([p >= capacity_cuts["top 10%"], p >= capacity_cuts["top 20%"]],
+                     ["top 10%", "top 20%"], default="fora da capacidade")
+
+
+def risk_level_table(y, p, cuts: dict = RISK_LEVELS) -> pd.DataFrame:
+    """Clientes, % da base e taxa de churn observada em cada nível de risco."""
+    t = (pd.DataFrame({"nivel_risco": risk_level(p, cuts), "y": np.asarray(y)})
+         .groupby("nivel_risco")["y"].agg(clientes="size", churn_real="mean")
+         .reindex(RISK_ORDER).fillna(0))
+    t["pct_base"] = t["clientes"] / t["clientes"].sum()
+    t["p_media"] = pd.Series(np.asarray(p)).groupby(risk_level(p, cuts)).mean().reindex(RISK_ORDER)
+    return t
 
 
 # --- Decisões e treino final ----------------------------------------------------------
