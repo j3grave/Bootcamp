@@ -26,6 +26,18 @@ def onboarding_segment(df: pd.DataFrame) -> pd.Series:
     return pd.Series(segment, index=df.index, name="onboarding")
 
 
+def onboarding_rule(new: pd.DataFrame) -> pd.DataFrame:
+    """Taxa de saída dos clientes novos por segmento de onboarding e nº de Joined em cada um.
+
+    new: clientes com tenure <= 3, com as colunas 'onboarding' (onboarding_segment), 'saiu'
+    (1 = Churned) e 'Customer Status'.
+    """
+    rule = new.groupby("onboarding")["saiu"].agg(clientes="size", taxa_saida="mean")
+    rule["joined_no_segmento"] = new[new["Customer Status"] == "Joined"].groupby(
+        "onboarding").size()
+    return rule.loc[ONBOARDING_ORDER]
+
+
 def onboarding_list(joined: pd.DataFrame) -> pd.DataFrame:
     """Lista dos Joined por segmento de onboarding; dentro de cada segmento, maior CLTV primeiro."""
     out = joined[["Customer ID", "Contract", "Internet Type", "CLTV"]].copy()
@@ -70,6 +82,14 @@ def compare_orderings(y, cltv, score_p, score_value, cuts=(0.1, 0.2, 0.3)) -> pd
 
 
 # --- Quantos clientes contactar: custo-benefício ------------------------------------------
+# PARÂMETROS DE NEGÓCIO — PRESSUPOSTOS, NÃO DADOS. Usados pelo notebook 02 (secção 11.2) e por
+# scripts/run_modelling.py. Substituir pelos valores reais da empresa antes de tirar conclusões.
+CENARIOS = {
+    "Pessimista": {"taxa_sucesso": 0.10, "custo_contacto": 150},
+    "Base":       {"taxa_sucesso": 0.20, "custo_contacto": 100},
+    "Otimista":   {"taxa_sucesso": 0.30, "custo_contacto": 50},
+}
+
 # Pressupostos (não são dados do dataset; definidos no notebook 02, secção 11.2):
 #   taxa_sucesso    = % dos churners contactados que ficam por causa do contacto
 #   custo_contacto  = custo de contactar um cliente, incluindo o incentivo oferecido,

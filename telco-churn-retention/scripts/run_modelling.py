@@ -31,16 +31,6 @@ from telco_churn.config import ARTIFACTS_DIR, DATA_PROCESSED, TAB_DIR, ensure_di
 from telco_churn.style import apply_theme
 
 
-# Parâmetros de negócio — PRESSUPOSTOS, NÃO DADOS (iguais aos do notebook 02, secção 11.2).
-#   taxa_sucesso   : % dos churners contactados que ficam por causa do contacto
-#   custo_contacto : custo por cliente contactado (contacto + incentivo), na unidade do CLTV
-CENARIOS = {
-    "Pessimista": {"taxa_sucesso": 0.10, "custo_contacto": 150},
-    "Base":       {"taxa_sucesso": 0.20, "custo_contacto": 100},
-    "Otimista":   {"taxa_sucesso": 0.30, "custo_contacto": 50},
-}
-
-
 def step(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -224,12 +214,12 @@ def stage_retention(d, test_est, p_test_est):
                                                      score_value=p_test_est * cltv)
     orderings_compared.to_csv(TAB_DIR / "15b_P_vs_PxCLTV.csv")
 
-    # Custo-benefício: os pressupostos estão em CENARIOS, no topo do ficheiro
-    scenarios = retention.scenario_table(y_est, p_test_est, cltv, CENARIOS)
+    # Custo-benefício: os pressupostos estão em retention.CENARIOS
+    scenarios = retention.scenario_table(y_est, p_test_est, cltv, retention.CENARIOS)
     scenarios.to_csv(TAB_DIR / "20_cenarios_custo_beneficio.csv")
     value_curves = {name: retention.net_value_curve(y_est, cltv, p_test_est * cltv,
                                                     params["taxa_sucesso"], params["custo_contacto"])
-                    for name, params in CENARIOS.items()}
+                    for name, params in retention.CENARIOS.items()}
     model_plots.plot_net_value(value_curves, show=False)
     sensitivity = retention.sensitivity_grid(p_test_est, cltv,
                                              success_rates=[0.05, 0.10, 0.20, 0.30, 0.40],
@@ -255,10 +245,7 @@ def stage_onboarding(d):
     new = merged[~features.is_established(merged)].copy()
     new["saiu"] = (new["Customer Status"] == "Churned").astype(int)
     new["onboarding"] = retention.onboarding_segment(new)
-    rule = new.groupby("onboarding")["saiu"].agg(clientes="size", taxa_saida="mean")
-    rule["joined_no_segmento"] = new[new["Customer Status"] == "Joined"].groupby(
-        "onboarding").size()
-    rule = rule.loc[retention.ONBOARDING_ORDER]
+    rule = retention.onboarding_rule(new)
     rule.to_csv(TAB_DIR / "19_regra_onboarding.csv")
     return rule, retention.onboarding_list(d.joined)
 
