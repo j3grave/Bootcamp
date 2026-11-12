@@ -321,6 +321,34 @@ def best_f1_threshold(y, p) -> float:
     return float(THRESHOLD_GRID[int(np.argmax(f1))])
 
 
+# --- Decisões e treino final ----------------------------------------------------------
+def include_city(cv_table: pd.DataFrame, best: str, city_cv: pd.DataFrame) -> tuple[float, bool]:
+    """Ganho de AUC em CV ao juntar City e se compensa incluí-la.
+
+    Só compensa se o ganho for maior do que o desvio-padrão do melhor modelo entre folds;
+    abaixo disso, a diferença está dentro do ruído.
+    """
+    gain = city_cv["auc"].iloc[0] - cv_table.loc[best, "auc"]
+    return gain, bool(gain > cv_table.loc[best, "auc_std"])
+
+
+def fit_predict(models: dict, X_train: pd.DataFrame, y_train, X_test: pd.DataFrame) -> dict:
+    """Treina cada modelo no treino completo e devolve P(churn) no teste, por modelo."""
+    return {name: m.fit(X_train, y_train).predict_proba(X_test)[:, 1]
+            for name, m in models.items()}
+
+
+def save_bundle(path, model, name: str, features: list[str], target: str, best_params: dict,
+                cv: dict, holdout: dict, **extra) -> None:
+    """Guarda o modelo e o que é preciso para o voltar a usar (joblib).
+
+    Chaves: model, name, features, target, best_params, cv, holdout e as de `extra`
+    (ex.: population). A app e os testes leem este dicionário.
+    """
+    joblib.dump({"model": model, "name": name, "features": features, "target": target,
+                 "best_params": best_params, "cv": cv, "holdout": holdout, **extra}, path)
+
+
 # --- Avaliação final -------------------------------------------------------------------
 def holdout_report(probas: dict, y: pd.Series, benchmark: pd.Series) -> pd.DataFrame:
     """Nove métricas no holdout para cada modelo e para o Churn Score IBM (0–100 -> 0–1)."""
