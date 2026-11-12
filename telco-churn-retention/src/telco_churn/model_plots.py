@@ -39,6 +39,15 @@ def _color(model: str, best: str | None = None) -> str:
     return BLUE
 
 
+def _label_bars(ax, vals, xmax: float) -> None:
+    """Escreve o valor de cada barra: dentro (a branco) se couber, senão à direita."""
+    for i, v in enumerate(vals):
+        if v > 0.3 * xmax:   # dentro da barra, para não colidir com o losango do treino
+            ax.text(v - xmax * 0.015, i, f"{v:.3f}", va="center", ha="right",
+                    color="#FFFFFF", fontsize=7, fontweight="bold")
+        else:
+            ax.text(v + xmax * 0.015, i, f"{v:.3f}", va="center", color=INK, fontsize=7)
+
 # --- Comparação geral --------------------------------------------------------------------
 def plot_cv_comparison(cv: pd.DataFrame, benchmark_auc: float | None = None,
                        name: str = "21_cv_modelos",
@@ -86,14 +95,10 @@ def plot_metrics_panel(view: pd.DataFrame, std: pd.DataFrame | None = None,
         if train is not None:
             ax.scatter(train.loc[order, m].astype(float), order, marker="D", s=18,
                        facecolor=BG, edgecolor=INK, linewidth=1, zorder=3)
-        top = max(vals.max(), train[m].max() if train is not None else 0)
-        xmax = top * 1.28 if m in LOWER_IS_BETTER else 1.12
-        for i, v in enumerate(vals):
-            if v > 0.3 * xmax:   # valor dentro da barra, para não colidir com o losango
-                ax.text(v - xmax * 0.015, i, f"{v:.3f}", va="center", ha="right",
-                        color="#FFFFFF", fontsize=7, fontweight="bold")
-            else:
-                ax.text(v + xmax * 0.015, i, f"{v:.3f}", va="center", color=INK, fontsize=7)
+        xmax = 1.12
+        if m in LOWER_IS_BETTER:   # métricas sem teto natural: escala pelo maior valor
+            xmax = 1.28 * max(vals.max(), train[m].max() if train is not None else 0)
+        _label_bars(ax, vals, xmax)
         ax.set_xlim(0, xmax)
         better = "menor" if m in LOWER_IS_BETTER else "maior"
         ax.set_title(f"{METRIC_TITLES[m]}  ·  {better} é melhor", fontsize=9)
