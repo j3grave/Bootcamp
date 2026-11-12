@@ -1,0 +1,9 @@
+# Dependências da app no Hugging Face Space (o Gradio é instalado pelo Space: sdk_version no README).
+# Versões iguais às do treino (requirements-lock.txt): o joblib só carrega o modelo com o mesmo
+# scikit-learn com que foi gravado.
+scikit-learn==1.9.1
+pandas==2.3.3
+numpy==2.3.5
+scipy==1.16.3
+joblib==1.6.0
+huggingface_hub==2.4.0

@@ -1,0 +1,96 @@
+"""Publica o modelo (Model repo) e a app (Space) no Hugging Face.
+
+Chamado pelo GitHub Actions (deploy-hf.yml) só depois de a pipeline e os testes passarem.
+
+Uso, a partir da raiz do projeto (telco-churn-retention):
+    HF_TOKEN=... python scripts/publish_hf.py --model-repo conta/telco-churn-model --space conta/telco-churn-app
+    python scripts/publish_hf.py --model-repo conta/m --space conta/s --dry-run   # só prepara
+
+O Space recebe a pasta app/, uma cópia do pacote src/telco_churn (para add_features e
+scoring) e um CSV de exemplo para o separador "Lote". A variável MODEL_REPO do Space é
+definida aqui, para a app saber de onde descarregar o modelo.
+"""
+import argparse
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+import joblib
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from telco_churn import scoring  # noqa: E402
+from telco_churn.config import ARTIFACTS_DIR, DATA_PROCESSED  # noqa: E402
+
+MODEL = ARTIFACTS_DIR / "final_model.joblib"
+
+
+def metrics_section(bundle: dict) -> str:
+    """Tabela de métricas desta versão, para o fim do model card."""
+    rows = [("Modelo escolhido: " + bundle["name"], bundle["cv"], bundle["holdout"]),
+            ("Churn Score IBM (benchmark)", bundle["benchmark_cv"], bundle["benchmark_holdout"])]
+    lines = ["## Métricas desta versão", "",
+             f"Seleção: {bundle['selection']}", "",
+             "| | AUC CV (± dp) | AUC holdout | PR AUC holdout | Brier holdout |",
+             "|---|---|---|---|---|"]
+    for name, cv, hold in rows:
+        h = f"{hold['auc']:.3f} | {hold['pr_auc']:.3f} | {hold['brier']:.3f}"
+        lines.append(f"| {name} | {cv['auc']:.3f} ± {cv['auc_std']:.3f} | {h} |")
+    cuts = bundle["risk_cuts"]
+    lines += ["", f"Segmentos de risco: alto se P(churn) ≥ {cuts['alto']:.3f} (top 10%), "
+                  f"médio se ≥ {cuts['médio']:.3f} (top 20%)."]
+    return "\n".join(lines) + "\n"
+
+
+def stage_space(staging: Path, bundle: dict) -> None:
+    """Pasta do Space: app/ + pacote telco_churn + CSV de exemplo."""
+    shutil.copytree(ROOT / "app", staging, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__", "telco_churn"))
+    shutil.copytree(ROOT / "src" / "telco_churn", staging / "telco_churn",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    test = pd.read_csv(DATA_PROCESSED / "test.csv", keep_default_na=False, na_values=[""])
+    cols = [scoring.ID_COL, scoring.CLTV_COL] + scoring.input_columns(bundle)
+    test[cols].head(30).to_csv(staging / "exemplo_lote.csv", index=False)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--model-repo", default=os.environ.get("HF_MODEL_REPO"), required=False)
+    parser.add_argument("--space", default=os.environ.get("HF_SPACE"), required=False)
+    parser.add_argument("--dry-run", action="store_true", help="prepara os ficheiros sem publicar")
+    args = parser.parse_args()
+    if not args.model_repo or not args.space:
+        sys.exit("Indicar --model-repo e --space (ou HF_MODEL_REPO e HF_SPACE)")
+    bundle = joblib.load(MODEL)
+
+    staging = Path(tempfile.mkdtemp(prefix="hf_"))
+    model_dir, space_dir = staging / "model", staging / "space"
+    model_dir.mkdir()
+    shutil.copy(MODEL, model_dir / "final_model.joblib")
+    card = (ROOT / "MODEL_CARD.md").read_text(encoding="utf-8")
+    (model_dir / "README.md").write_text(card + "\n" + metrics_section(bundle), encoding="utf-8")
+    stage_space(space_dir, bundle)
+    print(f"Ficheiros preparados em {staging}")
+    if args.dry_run:
+        return
+
+    from huggingface_hub import HfApi
+    api = HfApi(token=os.environ["HF_TOKEN"])
+    api.create_repo(args.model_repo, repo_type="model", exist_ok=True)
+    api.upload_folder(folder_path=model_dir, repo_id=args.model_repo, repo_type="model",
+                      commit_message=f"Modelo {bundle['name']} (AUC holdout "
+                                     f"{bundle['holdout']['auc']:.3f})")
+    api.create_repo(args.space, repo_type="space", space_sdk="gradio", exist_ok=True)
+    api.add_space_variable(args.space, "MODEL_REPO", args.model_repo)
+    api.upload_folder(folder_path=space_dir, repo_id=args.space, repo_type="space",
+                      commit_message="Atualiza a app")
+    print(f"Modelo: https://huggingface.co/{args.model_repo}")
+    print(f"App:    https://huggingface.co/spaces/{args.space}")
+
+
+if __name__ == "__main__":
+    main()
