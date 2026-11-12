@@ -25,7 +25,6 @@ matplotlib.use("Agg")
 
 import joblib
 import pandas as pd
-from sklearn.inspection import permutation_importance
 
 from telco_churn import features, model_plots, modelling, plots, retention
 from telco_churn.config import ARTIFACTS_DIR, DATA_PROCESSED, TAB_DIR, ensure_dirs
@@ -111,12 +110,12 @@ def main() -> None:
     USE_CITY, FEATURES_CITY, city_model = False, FEATURES + ["City"], None
     if not args.rapido:
         step("Variantes: com Satisfaction Score e com City (TargetEncoder)...")
-        cv_com = modelling.cv_compare({BEST + " — com Satisfaction": modelo_com},
-                                      train[FEATURES_SAT], y_train)
+        cv_com = modelling.cv_evaluate({BEST + " — com Satisfaction": modelo_com},
+                                       train[FEATURES_SAT], y_train)[0][modelling.SUMMARY_COLS]
         city_model = modelling.build_models(NUM, CAT, best_params, te=["City"])[BEST]
-        city_cv = modelling.cv_compare({BEST + " + City (TargetEncoder)": city_model},
-                                       train[FEATURES_CITY], y_train)
-        sem = cv_table.loc[[BEST], ["auc", "auc_std", "pr_auc", "brier"]].rename(
+        city_cv = modelling.cv_evaluate({BEST + " + City (TargetEncoder)": city_model},
+                                        train[FEATURES_CITY], y_train)[0][modelling.SUMMARY_COLS]
+        sem = cv_table.loc[[BEST], modelling.SUMMARY_COLS].rename(
             index={BEST: BEST + " — sem Satisfaction"})
         pd.concat([sem, cv_com, city_cv]).to_csv(TAB_DIR / "12_variantes_satisfaction_city.csv")
         gain = city_cv["auc"].iloc[0] - cv_table.loc[BEST, "auc"]
@@ -149,10 +148,7 @@ def main() -> None:
 
     # 8 · Interpretação
     step("Permutation importance...")
-    pi = permutation_importance(final_model, test[FINAL_FEATURES], y_test, scoring="roc_auc",
-                                n_repeats=5, random_state=0, n_jobs=-1)
-    importance = pd.Series(pi.importances_mean, index=FINAL_FEATURES).clip(lower=0)
-    importance = importance.sort_values(ascending=False)
+    importance = modelling.permutation_ranking(final_model, test[FINAL_FEATURES], y_test)
     importance.to_frame("queda_auc").to_csv(TAB_DIR / "14_importancia_permutacao.csv")
     plots.plot_ranking(importance.head(20), f"Permutation importance — {BEST} (queda de AUC, holdout)",
                        "27_importancia_permutacao", highlight=set(CAT + ["City"]), show=False)
@@ -190,10 +186,7 @@ def main() -> None:
     ])
     comparison.to_csv(TAB_DIR / "17_comparacao_core_priorizacao.csv")
 
-    pi_est = permutation_importance(priority_model, X_test_est, y_test_est, scoring="roc_auc",
-                                    n_repeats=5, random_state=0, n_jobs=-1)
-    importance_est = pd.Series(pi_est.importances_mean, index=FEATURES).clip(lower=0)
-    importance_est = importance_est.sort_values(ascending=False)
+    importance_est = modelling.permutation_ranking(priority_model, X_test_est, y_test_est)
     importance_est.to_frame("queda_auc").to_csv(TAB_DIR / "18_importancia_priorizacao.csv")
     plots.plot_ranking(importance_est.head(20),
                        f"Permutation importance — {BEST_EST} (tenure > 3, holdout)",

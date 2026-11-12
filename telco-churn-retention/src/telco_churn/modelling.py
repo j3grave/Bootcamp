@@ -21,6 +21,7 @@ from sklearn.base import clone
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import (ExtraTreesClassifier, HistGradientBoostingClassifier,
                               RandomForestClassifier, StackingClassifier, VotingClassifier)
+from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold
 from sklearn.neighbors import KNeighborsClassifier
@@ -126,6 +127,7 @@ METRICS = {
     "f1": ("F1: média harmónica de precision e recall (limiar 0,5)", True),
 }
 LOWER_IS_BETTER = [m for m, (_, higher) in METRICS.items() if not higher]
+SUMMARY_COLS = ["auc", "auc_std", "pr_auc", "brier"]   # resumo usado nas tabelas de variantes
 
 
 def classification_metrics(y, p, threshold: float = THRESHOLD) -> dict:
@@ -271,12 +273,6 @@ def cv_evaluate(models: dict, X: pd.DataFrame, y: pd.Series,
     return table, oof
 
 
-def cv_compare(models: dict, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
-    """Versão resumida de cv_evaluate: AUC (± desvio), PR-AUC e Brier em 5-fold."""
-    table, _ = cv_evaluate(models, X, y)
-    return table[["auc", "auc_std", "pr_auc", "brier"]]
-
-
 def metrics_view(table: pd.DataFrame, kind: str = "cv") -> pd.DataFrame:
     """Só as nove métricas, de CV (kind='cv') ou de treino (kind='train')."""
     cols = list(METRICS) if kind == "cv" else [f"{m}_train" for m in METRICS]
@@ -346,6 +342,17 @@ def comparison_table(rows: list) -> pd.DataFrame:
         row.update(classification_metrics(y, p))
         table.append(row)
     return pd.DataFrame(table).set_index(["conjunto", "modelo"])
+
+
+def permutation_ranking(model, X: pd.DataFrame, y) -> pd.Series:
+    """Queda média do AUC quando se baralha cada coluna (5 repetições), da maior para a menor.
+
+    Valores negativos (baralhar não piorou o modelo) passam a 0.
+    """
+    pi = permutation_importance(model, X, y, scoring="roc_auc", n_repeats=5, random_state=0,
+                                n_jobs=-1)
+    importance = pd.Series(pi.importances_mean, index=X.columns, name="queda_auc")
+    return importance.clip(lower=0).sort_values(ascending=False)
 
 
 # --- Priorização -------------------------------------------------------------------------
