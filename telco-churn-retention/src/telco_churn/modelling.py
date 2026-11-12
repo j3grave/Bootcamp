@@ -6,8 +6,11 @@ Protocolo (descrito em docs/modelling.md):
     2. Os hiperparâmetros são escolhidos com RandomizedSearchCV (StratifiedKFold, 5 folds),
        só no treino.
     3. Todos os modelos, base e ensembles, são comparados na mesma validação cruzada, com
-       nove métricas. O modelo final é o de maior ROC AUC em CV.
-    4. O holdout (20%) é usado uma única vez, no fim, ao lado do Churn Score IBM.
+       nove métricas, ao lado de três referências: a taxa de churn (Dummy), uma regra de negócio
+       sem ML e o Churn Score IBM (avaliado nos mesmos folds).
+    4. Regra de parcimónia: entre o modelo de maior AUC e os empatados com ele (diferença menor
+       do que um desvio-padrão entre folds), escolhe-se o mais simples (COMPLEXITY_ORDER).
+    5. O holdout (20%) é usado uma única vez, no fim, ao lado das mesmas referências.
 
 A descrição de cada modelo está em docs/models.md e no dicionário MODEL_INFO abaixo.
 """
@@ -17,7 +20,7 @@ import pandas as pd
 from joblib import Parallel, delayed
 from scipy.stats import loguniform
 from sklearn import metrics
-from sklearn.base import clone
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import (ExtraTreesClassifier, HistGradientBoostingClassifier,
                               RandomForestClassifier, StackingClassifier, VotingClassifier)
@@ -73,6 +76,15 @@ BASE_MODELS = {
          "clf__l2_regularization": loguniform(1e-3, 10)}),
 }
 BASELINE = "Baseline (taxa de churn)"
+RULE_BASELINE = "Regra de negócio (pontos)"
+BENCHMARK = "Churn Score IBM (benchmark)"
+REFERENCES = [BASELINE, RULE_BASELINE, BENCHMARK]   # comparam-se, mas nunca são escolhidas
+
+# Regra de parcimónia: do mais simples (e mais fácil de explicar) para o mais complexo.
+# Entre modelos empatados com o melhor em CV, escolhe-se o que aparece primeiro nesta lista.
+COMPLEXITY_ORDER = ["Logistic Regression", "Decision Tree", "k-Nearest Neighbors",
+                    "Random Forest", "Extra Trees", "Gradient Boosting", "Neural Network (MLP)",
+                    "Soft Voting", "Stacking"]
 ENSEMBLES = ["Soft Voting", "Stacking"]
 
 # Membros dos ensembles: modelos fortes e de famílias diferentes (linear, rede neuronal,
@@ -92,6 +104,8 @@ ENSEMBLE_MEMBERS = {
 MODEL_INFO = pd.DataFrame([
     (BASELINE, "referência", "—",
      "Dá a todos os clientes a taxa de churn do treino. Qualquer modelo útil tem de a bater."),
+    (RULE_BASELINE, "referência (sem ML)", "—",
+     "1 ponto por fator de risco: Month-to-Month, tenure ≤ 12 meses, fibra ótica (0 a 3)."),
     ("Logistic Regression", "linear", "linear",
      "Soma ponderada das variáveis passada por uma sigmoide. Simples, estável e interpretável."),
     ("Decision Tree", "árvore", "trees",
@@ -174,6 +188,36 @@ def load_processed() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
     return train, test, joined, cfg
 
 
+# --- Regra de negócio (linha de base sem ML) ----------------------------------------------
+class BusinessRuleScore(ClassifierMixin, BaseEstimator):
+    """Regra simples, sem ML: 1 ponto por cada fator de risco, de 0 a 3 pontos.
+
+    Fatores fixados à partida a partir da EDA (associação mais forte com o churn no treino):
+    contrato Month-to-Month, tenure até 12 meses e internet por fibra ótica.
+    fit() só regista a taxa de churn de cada nº de pontos no treino, para a regra dar uma
+    probabilidade (precisa-se dela para o Brier e o log loss; o AUC só depende dos pontos).
+    """
+
+    def points(self, X: pd.DataFrame) -> np.ndarray:
+        return ((X["Contract"] == "Month-to-Month").astype(int)
+                + (X["Tenure in Months"] <= 12).astype(int)
+                + (X["Internet Type"] == "Fiber Optic").astype(int)).to_numpy()
+
+    def fit(self, X: pd.DataFrame, y):
+        y = np.asarray(y)
+        rates = pd.Series(y).groupby(self.points(X)).mean()
+        self.rate_ = rates.reindex(range(4)).fillna(y.mean()).to_numpy()
+        self.classes_ = np.array([0, 1])
+        return self
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        p = self.rate_[self.points(X)]
+        return np.column_stack([1 - p, p])
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        return (self.predict_proba(X)[:, 1] >= THRESHOLD).astype(int)
+
+
 # --- Construção dos modelos ----------------------------------------------------------
 def make_preprocessors(num: list[str], cat: list[str], te: list[str] = ()) -> dict:
     """Pré-processadores do notebook 01 + TargetEncoder opcional (ex.: City).
@@ -210,7 +254,7 @@ def tune_base_models(X: pd.DataFrame, y: pd.Series, num: list[str], cat: list[st
 
 def build_models(num: list[str], cat: list[str], params: dict, te: list[str] = (),
                  baseline: bool = True) -> dict:
-    """Linha de base + modelos base afinados + dois ensembles (soft voting e stacking).
+    """Linhas de base (Dummy e regra de negócio) + modelos afinados + dois ensembles.
 
     Os ensembles usam os modelos de ENSEMBLE_MEMBERS. O stacking aprende os pesos com
     previsões out-of-fold (cv=5), para não aprender com previsões feitas sobre o seu treino.
@@ -226,7 +270,10 @@ def build_models(num: list[str], cat: list[str], params: dict, te: list[str] = (
         "Stacking": StackingClassifier(members, final_estimator=LogisticRegression(max_iter=1000),
                                        cv=CV, stack_method="predict_proba", n_jobs=-1),
     }
-    first = {BASELINE: _pipeline(preps["trees"], DummyClassifier(strategy="prior"))} if baseline else {}
+    first = {}
+    if baseline:
+        first = {BASELINE: _pipeline(preps["trees"], DummyClassifier(strategy="prior")),
+                 RULE_BASELINE: BusinessRuleScore()}
     return first | base | ensembles
 
 
@@ -237,9 +284,23 @@ def _fit_fold(model, X, y, tr, va):
     return tr, va, m.predict_proba(X.iloc[tr])[:, 1], m.predict_proba(X.iloc[va])[:, 1]
 
 
-def cv_evaluate(models: dict, X: pd.DataFrame, y: pd.Series,
-                threshold: float = THRESHOLD) -> tuple[pd.DataFrame, dict]:
+def _summary_row(name: str, val_scores: list, train_scores: list) -> dict:
+    """Média e desvio-padrão por métrica nos folds de validação, e média nos de treino."""
+    val, trn = pd.DataFrame(val_scores), pd.DataFrame(train_scores)
+    row = {"modelo": name}
+    for m in METRICS:
+        row[m] = val[m].mean()
+        row[f"{m}_std"] = val[m].std()
+        row[f"{m}_train"] = trn[m].mean()
+    return row
+
+
+def cv_evaluate(models: dict, X: pd.DataFrame, y: pd.Series, threshold: float = THRESHOLD,
+                benchmarks: dict | None = None) -> tuple[pd.DataFrame, dict]:
     """Avalia todos os modelos no mesmo 5-fold estratificado.
+
+    benchmarks: {nome: score em [0, 1]} de referências que não se treinam (ex.: o Churn Score
+    IBM / 100). São avaliadas nos mesmos folds, para comparar com os modelos de forma justa.
 
     Devolve:
         table: uma linha por modelo, com a média e o desvio-padrão de cada métrica nos folds
@@ -261,14 +322,14 @@ def cv_evaluate(models: dict, X: pd.DataFrame, y: pd.Series,
             p_oof[va] = p_va
             val_scores.append(classification_metrics(y.iloc[va], p_va, threshold))
             train_scores.append(classification_metrics(y.iloc[tr], p_tr, threshold))
-        val, trn = pd.DataFrame(val_scores), pd.DataFrame(train_scores)
-        row = {"modelo": name}
-        for m in METRICS:
-            row[m] = val[m].mean()
-            row[f"{m}_std"] = val[m].std()
-            row[f"{m}_train"] = trn[m].mean()
-        rows.append(row)
+        rows.append(_summary_row(name, val_scores, train_scores))
         oof[name] = p_oof
+    for name, score in (benchmarks or {}).items():
+        score = np.asarray(score, dtype=float)
+        rows.append(_summary_row(
+            name, [classification_metrics(y.iloc[va], score[va], threshold) for _, va in folds],
+            [classification_metrics(y.iloc[tr], score[tr], threshold) for tr, _ in folds]))
+        oof[name] = score
     table = pd.DataFrame(rows).set_index("modelo").sort_values("auc", ascending=False)
     return table, oof
 
@@ -282,8 +343,8 @@ def metrics_view(table: pd.DataFrame, kind: str = "cv") -> pd.DataFrame:
 
 
 def select_best(table: pd.DataFrame, metric: str = "auc") -> str:
-    """Modelo com melhor valor médio em CV (a linha de base não é candidata)."""
-    return table.drop(index=BASELINE, errors="ignore")[metric].idxmax()
+    """Modelo com melhor valor médio em CV (as referências não são candidatas)."""
+    return table.drop(index=REFERENCES, errors="ignore")[metric].idxmax()
 
 
 def tied_with_best(table: pd.DataFrame, best: str, metric: str = "auc") -> list[str]:
@@ -291,14 +352,36 @@ def tied_with_best(table: pd.DataFrame, best: str, metric: str = "auc") -> list[
 
     Na prática estão empatados: a diferença está dentro do ruído entre folds.
     """
-    t = table.drop(index=BASELINE, errors="ignore")
+    t = table.drop(index=REFERENCES, errors="ignore")
     gap = t.loc[best, metric] - t[metric]
     return list(t.index[(gap < t.loc[best, f"{metric}_std"]) & (t.index != best)])
 
 
+def select_parsimonious(table: pd.DataFrame, metric: str = "auc") -> tuple[str, pd.DataFrame, str]:
+    """Regra de parcimónia: o mais simples entre o melhor e os empatados com ele.
+
+    Devolve (modelo escolhido, tabela da decisão, justificação em texto).
+    """
+    best = select_best(table, metric)
+    candidates = [best] + tied_with_best(table, best, metric)
+    chosen = min(candidates, key=COMPLEXITY_ORDER.index)
+    decision = table.drop(index=REFERENCES, errors="ignore")[[metric, f"{metric}_std"]].copy()
+    decision["ordem_complexidade"] = [COMPLEXITY_ORDER.index(m) + 1 for m in decision.index]
+    decision["empatado_com_melhor"] = decision.index.isin(candidates)
+    decision["maior_auc"] = decision.index == best
+    decision["escolhido"] = decision.index == chosen
+    if chosen == best:
+        reason = (f"{best} tem o maior {metric.upper()} em CV e é o mais simples entre os "
+                  f"empatados ({', '.join(candidates)}).")
+    else:
+        reason = (f"{best} tem o maior {metric.upper()} em CV, mas {chosen} está empatado "
+                  f"(diferença < 1 desvio-padrão) e é mais simples: escolhe-se {chosen}.")
+    return chosen, decision.sort_values(metric, ascending=False), reason
+
+
 def prediction_correlation(oof: dict, models: list[str] | None = None) -> pd.DataFrame:
     """Correlação entre as probabilidades OOF dos modelos (diversidade para os ensembles)."""
-    models = models or [m for m in oof if m != BASELINE]
+    models = models or [m for m in oof if m not in REFERENCES]
     return pd.DataFrame({m: oof[m] for m in models}).corr()
 
 
@@ -319,6 +402,31 @@ def best_f1_threshold(y, p) -> float:
     """Limiar que maximiza o F1 (referência; a escolha final depende dos custos de negócio)."""
     f1 = threshold_table(y, p, THRESHOLD_GRID)["f1"].to_numpy()
     return float(THRESHOLD_GRID[int(np.argmax(f1))])
+
+
+def capacity_thresholds(p, shares=(0.10, 0.20)) -> dict:
+    """Limiar de P(churn) que sinaliza exatamente os top x% de clientes (capacidade da equipa)."""
+    p = np.asarray(p, dtype=float)
+    return {share: float(np.quantile(p, 1 - share)) for share in shares}
+
+
+def decision_table(y, p, thresholds: dict) -> pd.DataFrame:
+    """Precision, recall, F1 e % sinalizados para limiares de decisão com nome.
+
+    thresholds: {critério: limiar}, ex.: {"0,5": 0.5, "melhor F1": 0.37, "top 10%": 0.81}.
+    """
+    t = threshold_table(y, p, tuple(thresholds.values()))
+    t.insert(0, "criterio", list(thresholds))
+    return t.reset_index().set_index("criterio")
+
+
+def risk_segment(p, cuts: dict) -> np.ndarray:
+    """Segmento de risco: 'alto' acima do corte do top 10%, 'médio' até ao top 20%, 'baixo'.
+
+    cuts: {"alto": limiar, "médio": limiar}, guardados no final_model.joblib (risk_cuts).
+    """
+    p = np.asarray(p, dtype=float)
+    return np.select([p >= cuts["alto"], p >= cuts["médio"]], ["alto", "médio"], default="baixo")
 
 
 # --- Decisões e treino final ----------------------------------------------------------
@@ -353,7 +461,7 @@ def save_bundle(path, model, name: str, features: list[str], target: str, best_p
 def holdout_report(probas: dict, y: pd.Series, benchmark: pd.Series) -> pd.DataFrame:
     """Nove métricas no holdout para cada modelo e para o Churn Score IBM (0–100 -> 0–1)."""
     rows = {name: classification_metrics(y, p) for name, p in probas.items()}
-    rows["Churn Score IBM (benchmark)"] = classification_metrics(y, benchmark / 100)
+    rows[BENCHMARK] = classification_metrics(y, benchmark / 100)
     return pd.DataFrame(rows).T.sort_values("auc", ascending=False)
 
 

@@ -42,4 +42,7 @@ Thumbs.db
 .idea/
 
 # --- Cópia de referência das tabelas (regra 5 das instruções) ------------
-outputs/_referencia/
+outputs/_referencia*/
+
+# --- Cópia do pacote feita no deploy do Space ---------------------------------
+app/telco_churn/

@@ -26,7 +26,7 @@ matplotlib.use("Agg")
 
 import pandas as pd
 
-from telco_churn import features, model_plots, modelling, plots, retention
+from telco_churn import features, model_plots, modelling, plots, retention, scoring
 from telco_churn.config import ARTIFACTS_DIR, DATA_PROCESSED, TAB_DIR, ensure_dirs
 from telco_churn.style import apply_theme
 
@@ -53,42 +53,46 @@ def stage_cv(d, n_iter: int):
     best_params, tuning = modelling.tune_base_models(X, y, d.NUM, d.CAT, n_iter=n_iter)
     tuning.to_csv(TAB_DIR / "10_tuning_modelos_base.csv")
 
-    step("Validação cruzada de todos os modelos e ensembles...")
+    step("Validação cruzada de todos os modelos, ensembles e referências...")
     models = modelling.build_models(d.NUM, d.CAT, best_params)
-    cv_table, oof = modelling.cv_evaluate(models, X, y)
+    ibm = {modelling.BENCHMARK: d.train["Churn Score"].to_numpy() / 100}
+    cv_table, oof = modelling.cv_evaluate(models, X, y, benchmarks=ibm)
     cv_table.to_csv(TAB_DIR / "11_cv_modelos.csv")
-    best = modelling.select_best(cv_table)
-    cv_plots(d, models, cv_table, oof, best)
-    step(f"Modelo selecionado (maior AUC em CV): {best} ({cv_table.loc[best, 'auc']:.4f})")
-    tied = modelling.tied_with_best(cv_table, best)
-    if tied:
-        step(f"Empatados com o selecionado (diferença < 1 desvio-padrão): {', '.join(tied)}")
-    return best_params, models, cv_table, best
+    best, decision, reason = modelling.select_parsimonious(cv_table)
+    decision.to_csv(TAB_DIR / "11d_selecao_modelo.csv")
+    step(f"Seleção (regra de parcimónia): {reason}")
+    thresholds = cv_plots(d, models, cv_table, oof, best)
+    return best_params, models, cv_table, best, reason, thresholds
 
 
-def cv_plots(d, models, cv_table, oof, best) -> None:
-    """Gráficos e tabelas da comparação em CV (só leitura: não muda nenhuma decisão)."""
+def cv_plots(d, models, cv_table, oof, best) -> dict:
+    """Gráficos e tabelas da comparação em CV; devolve os limiares de decisão (out-of-fold)."""
     X, y = d.train[d.FEATURES], d.train[d.TARGET]
-    auc_ibm = modelling.classification_metrics(y, d.train["Churn Score"] / 100)["auc"]
     corr = modelling.prediction_correlation(oof)
     corr.to_csv(TAB_DIR / "11c_correlacao_modelos.csv")
     model_plots.plot_diversity(corr, show=False)
-    model_plots.plot_cv_comparison(cv_table, benchmark_auc=auc_ibm, show=False)
+    model_plots.plot_cv_comparison(cv_table, show=False)
     view = modelling.metrics_view(cv_table)
     std = cv_table[[f"{m}_std" for m in modelling.METRICS]]
     std.columns = list(modelling.METRICS)
     model_plots.plot_metrics_panel(view, std=std, train=modelling.metrics_view(cv_table, "train"),
                                    best=best, show=False)
     model_plots.plot_metrics_heatmap(view, show=False)
-    model_plots.plot_overfitting(cv_table.drop(index=modelling.BASELINE), show=False)
-    oof_ibm = oof | {"Churn Score IBM": d.train["Churn Score"].to_numpy() / 100}
-    model_plots.plot_roc_pr(y, oof_ibm, best=best, show=False)
+    model_plots.plot_overfitting(cv_table.drop(index=modelling.REFERENCES), show=False)
+    model_plots.plot_roc_pr(y, oof, best=best, show=False)
     model_plots.plot_confusion_matrices(y, oof, show=False)
     t_f1 = modelling.best_f1_threshold(y, oof[best])
     modelling.threshold_table(y, oof[best]).to_csv(TAB_DIR / "11b_limiares_modelo_final.csv")
     model_plots.plot_threshold(y, oof[best], best, marker=t_f1, show=False)
+    # Limiares de negócio: capacidade da equipa de retenção (top 10% / 20% dos clientes)
+    cuts = modelling.capacity_thresholds(oof[best])
+    thresholds = {"0,5 (por omissão)": 0.5, "melhor F1": t_f1,
+                  "capacidade top 10%": cuts[0.10], "capacidade top 20%": cuts[0.20]}
+    modelling.decision_table(y, oof[best], thresholds).to_csv(
+        TAB_DIR / "11e_limiares_negocio_cv.csv")
     mlp = models["Neural Network (MLP)"].fit(X, y).named_steps["clf"]
     model_plots.plot_mlp_training(mlp, show=False)
+    return thresholds
 
 
 def stage_variants(d, best_params, cv_table, best, rapido: bool):
@@ -117,7 +121,7 @@ def stage_variants(d, best_params, cv_table, best, rapido: bool):
     return model_sat, city_model, use_city
 
 
-def stage_holdout(d, models, best, model_sat, city_model, use_city):
+def stage_holdout(d, models, best, model_sat, city_model, use_city, thresholds):
     """Avaliação final no holdout (uma única vez) e importância por permutação."""
     step("Avaliação final no holdout...")
     y_train, y_test = d.train[d.TARGET], d.test[d.TARGET]
@@ -133,6 +137,9 @@ def stage_holdout(d, models, best, model_sat, city_model, use_city):
     holdout = modelling.holdout_report(probas, y_test, d.test["Churn Score"])
     holdout.to_csv(TAB_DIR / "13_holdout.csv")
     p_test = probas[best]
+    # Os mesmos limiares, fixados na CV, aplicados uma vez ao holdout
+    modelling.decision_table(y_test, p_test, thresholds).to_csv(
+        TAB_DIR / "13b_limiares_negocio_holdout.csv")
     model_plots.plot_roc_calibration(y_test, {
         best: p_test, "Churn Score IBM": d.test["Churn Score"] / 100,
         "Logistic Regression": probas["Logistic Regression"],
@@ -161,16 +168,15 @@ def stage_priority_model(d, n_iter: int, best, p_test):
                                                             d.CAT, n_iter=n_iter)
     tuning_est.to_csv(TAB_DIR / "16_tuning_estabelecidos.csv")
     models_est = modelling.build_models(d.NUM, d.CAT, best_params_est)
-    cv_est, _ = modelling.cv_evaluate(models_est, X_train_est, y_train_est)
+    ibm_est = {modelling.BENCHMARK: train_est["Churn Score"].to_numpy() / 100}
+    cv_est, _ = modelling.cv_evaluate(models_est, X_train_est, y_train_est, benchmarks=ibm_est)
     cv_est.to_csv(TAB_DIR / "16b_cv_modelos_estabelecidos.csv")
-    auc_ibm_est = modelling.classification_metrics(
-        y_train_est, train_est["Churn Score"] / 100)["auc"]
-    model_plots.plot_cv_comparison(cv_est, benchmark_auc=auc_ibm_est,
-                                   name="28_cv_modelos_estabelecidos",
+    model_plots.plot_cv_comparison(cv_est, name="28_cv_modelos_estabelecidos",
                                    title="AUC em validação cruzada — clientes estabelecidos (tenure > 3)",
                                    show=False)
-    best_est = modelling.select_best(cv_est)
-    step(f"Modelo de priorização: {best_est} ({cv_est.loc[best_est, 'auc']:.4f})")
+    best_est, decision_est, reason_est = modelling.select_parsimonious(cv_est)
+    decision_est.to_csv(TAB_DIR / "16c_selecao_modelo_estabelecidos.csv")
+    step(f"Modelo de priorização: {reason_est}")
 
     priority_model = models_est[best_est].fit(X_train_est, y_train_est)
     p_test_est = priority_model.predict_proba(X_test_est)[:, 1]
@@ -250,13 +256,16 @@ def stage_onboarding(d):
     return rule, retention.onboarding_list(d.joined)
 
 
-def print_summary(best, holdout, priority_bundle, comparison, r, rule) -> None:
-    ibm = holdout.loc["Churn Score IBM (benchmark)"]
+def print_summary(best, reason, holdout, priority_bundle, comparison, r, rule) -> None:
+    ibm = holdout.loc[modelling.BENCHMARK]
+    rule_row = holdout.loc[modelling.RULE_BASELINE]
     print("\n=== Resumo ===")
-    print(f"Modelo final: {best}")
+    print(f"Modelo final: {best} — {reason}")
     print(f"  Holdout  AUC {holdout.loc[best, 'auc']:.3f} | PR-AUC {holdout.loc[best, 'pr_auc']:.3f}"
           f" | Brier {holdout.loc[best, 'brier']:.3f}")
     print(f"  IBM      AUC {ibm['auc']:.3f} | PR-AUC {ibm['pr_auc']:.3f} | Brier {ibm['brier']:.3f}")
+    print(f"  Regra    AUC {rule_row['auc']:.3f} | PR-AUC {rule_row['pr_auc']:.3f}"
+          f" | Brier {rule_row['brier']:.3f}")
     print(f"  Rede neuronal (MLP) no holdout: AUC {holdout.loc['Neural Network (MLP)', 'auc']:.3f}")
     print(f"Modelo de priorização (tenure > 3): {priority_bundle['name']}")
     print(comparison[["clientes", "auc", "pr_auc", "brier"]].round(3).to_string())
@@ -294,10 +303,10 @@ def main() -> None:
     d = load_data()
     step(f"Treino {d.train[d.FEATURES].shape} | Teste {d.test[d.FEATURES].shape}"
          f" | Joined {len(d.joined)}")
-    best_params, models, cv_table, best = stage_cv(d, n_iter)
+    best_params, models, cv_table, best, reason, thresholds = stage_cv(d, n_iter)
     model_sat, city_model, use_city = stage_variants(d, best_params, cv_table, best, args.rapido)
     final_model, final_features, holdout, p_test = stage_holdout(d, models, best, model_sat,
-                                                                 city_model, use_city)
+                                                                 city_model, use_city, thresholds)
     test_est, p_test_est, comparison, priority_bundle = stage_priority_model(d, n_iter, best,
                                                                              p_test)
     r = stage_retention(d, test_est, p_test_est)
@@ -306,14 +315,23 @@ def main() -> None:
     # Exportação
     modelling.save_bundle(ARTIFACTS_DIR / "final_model.joblib", final_model, best, final_features,
                           d.TARGET, best_params, cv=cv_table.loc[best].to_dict(),
-                          holdout=holdout.loc[best].to_dict())
+                          holdout=holdout.loc[best].to_dict(), selection=reason,
+                          benchmark_cv=cv_table.loc[modelling.BENCHMARK].to_dict(),
+                          benchmark_holdout=holdout.loc[modelling.BENCHMARK].to_dict(),
+                          form=scoring.form_spec(d.train, [c for c in final_features
+                                                           if c not in features.NEW_NUM
+                                                           + features.NEW_CAT]),
+                          cltv_median=float(d.train["CLTV"].median()),
+                          thresholds=thresholds,
+                          risk_cuts={"alto": thresholds["capacidade top 10%"],
+                                     "médio": thresholds["capacidade top 20%"]})
     modelling.save_bundle(ARTIFACTS_DIR / "priority_model.joblib", features=d.FEATURES,
                           target=d.TARGET, population="Churned + Stayed com tenure > 3",
                           **priority_bundle)
     r.prio_test.to_csv(DATA_PROCESSED / "prioridade_holdout.csv", index=False)
     onboarding_joined.to_csv(DATA_PROCESSED / "onboarding_joined.csv", index=False)
 
-    print_summary(best, holdout, priority_bundle, comparison, r, rule)
+    print_summary(best, reason, holdout, priority_bundle, comparison, r, rule)
 
 
 if __name__ == "__main__":

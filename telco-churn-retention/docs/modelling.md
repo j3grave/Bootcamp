@@ -37,15 +37,24 @@ A divisão treino/teste (80/20, estratificada, `RANDOM_STATE = 42`) é feita uma
 
 1. **Pipelines.** Cada modelo é um `Pipeline(prep, clf)`. O pré-processador é ajustado dentro de cada fold, por isso nenhuma estatística do fold de validação passa para o treino.
 2. **Tuning (secção 3).** Cada modelo base é afinado com `RandomizedSearchCV`: 20 combinações de hiperparâmetros (`N_ITER`), `StratifiedKFold` com 5 folds, métrica ROC AUC, só no treino.
-3. **Comparação (secção 4).** Os sete modelos base, a linha de base e os dois ensembles são avaliados no **mesmo** 5-fold estratificado, com as nove métricas abaixo. Para cada modelo guardamos:
+3. **Comparação (secção 4).** Os sete modelos base, os dois ensembles e **três referências** são avaliados no **mesmo** 5-fold estratificado, com as nove métricas abaixo. As referências servem para mostrar que o modelo acrescenta valor, e nunca são candidatas:
+   - **Dummy** (`Baseline (taxa de churn)`): dá a todos a taxa de churn do treino;
+   - **Regra de negócio** (`Regra de negócio (pontos)`, `modelling.BusinessRuleScore`): sem ML, 1 ponto por cada fator de risco — contrato Month-to-Month, tenure ≤ 12 meses, internet por fibra ótica — de 0 a 3 pontos. Os fatores foram fixados a partir da EDA no treino (Cramér's V e taxa de churn por categoria). A regra só aprende a taxa de churn de cada nº de pontos, para dar uma probabilidade;
+   - **Churn Score IBM** (`Churn Score IBM (benchmark)`): o score / 100, avaliado nos mesmos folds de validação (argumento `benchmarks` de `cv_evaluate`), para comparar a variabilidade entre folds com a dos modelos.
+
+   Para cada modelo guardamos:
    - a média e o desvio-padrão de cada métrica nos 5 folds de validação;
    - a média nos folds de treino, para medir o sobreajuste;
    - as previsões *out-of-fold*: cada cliente do treino recebe a probabilidade do modelo que não o viu. É com elas que se desenham as curvas ROC/PR, as matrizes de confusão e a análise de limiar, sem tocar no holdout.
-4. **Seleção.** O modelo final é o de maior ROC AUC médio em CV (`select_best`). A linha de base não é candidata. A função `tied_with_best` lista os modelos a menos de um desvio-padrão do vencedor, que na prática estão empatados com ele. Nesse caso, a escolha pode ser revista em favor do modelo mais simples ou mais bem calibrado, e essa decisão deve ficar justificada no relatório.
+4. **Seleção com regra de parcimónia** (`select_parsimonious`). Parte-se do modelo de maior ROC AUC médio em CV (`select_best`). `tied_with_best` lista os modelos a menos de um desvio-padrão do vencedor, que na prática estão empatados com ele: a diferença está dentro do ruído entre folds. Entre o vencedor e os empatados escolhe-se o **mais simples**, segundo a ordem fixa à partida em `modelling.COMPLEXITY_ORDER`:
+
+   Logistic Regression < Decision Tree < k-Nearest Neighbors < Random Forest < Extra Trees < Gradient Boosting < Neural Network (MLP) < Soft Voting < Stacking
+
+   A ordem segue o custo de explicar e manter o modelo: um modelo linear, depois árvores (uma, depois florestas, depois boosting), depois a rede neuronal e por fim os ensembles, que juntam cinco modelos. A tabela `11d_selecao_modelo.csv` regista o modelo de maior AUC, os empatados e o escolhido, e a justificação fica no `final_model.joblib` (chave `selection`).
 5. **Variantes (secções 5 e 6).** O modelo escolhido é testado com `Satisfaction Score`, para medir o efeito do leakage, e com `City` codificada por `TargetEncoder`. `City` só entra se o ganho em AUC for maior do que o desvio-padrão entre folds.
-6. **Holdout (secção 7).** Todos os modelos são treinados no treino completo e avaliados **uma única vez** nos 20% de teste, ao lado do Churn Score IBM. A escolha já foi feita no passo 4. Os outros modelos aparecem só por transparência.
+6. **Holdout (secção 7).** Todos os modelos são treinados no treino completo e avaliados **uma única vez** nos 20% de teste, ao lado das três referências. A escolha já foi feita no passo 4. Os outros modelos aparecem só por transparência.
 7. **Interpretação (secção 9).** Permutation importance do modelo core no holdout.
-8. **Modelo de priorização (secção 10).** Os passos 2 a 4 repetem-se só com os clientes estabelecidos (tenure > 3) do mesmo treino. O modelo escolhido é avaliado uma vez nos clientes estabelecidos do mesmo holdout e comparado, nesse subconjunto, com o modelo core e com o IBM (`17_comparacao_core_priorizacao.csv`).
+8. **Modelo de priorização (secção 10).** Os passos 2 a 4 (incluindo as referências e a regra de parcimónia, `16c_selecao_modelo_estabelecidos.csv`) repetem-se só com os clientes estabelecidos (tenure > 3) do mesmo treino. O modelo escolhido é avaliado uma vez nos clientes estabelecidos do mesmo holdout e comparado, nesse subconjunto, com o modelo core e com o IBM (`17_comparacao_core_priorizacao.csv`).
 9. **Priorização dos clientes estabelecidos (secção 11).** Lista ordenada por P(churn) × CLTV do modelo de priorização, comparação com a ordenação só por P, análise custo-benefício por cenários e ação sugerida por segmento.
 10. **Clientes novos (secção 12).** Os Joined não recebem P(churn). Recebem um segmento de onboarding definido por uma regra simples tirada da EDA.
 
@@ -85,15 +94,18 @@ A equipa de retenção não vai contactar "todos os clientes com P > 0,5". Vai c
 
 As métricas com limiar usam 0,5 por convenção. Com 28% de churn, esse limiar tende a deixar escapar churners: dá uma precision alta e um recall mais baixo. A secção 4 mostra, para o modelo final, como precision, recall e F1 mudam com o limiar (tabela `11b_limiares_modelo_final.csv` e gráfico `23d_limiar_modelo_final.png`), e indica o limiar que maximiza o F1 como referência. A escolha final deve vir do negócio, comparando o custo de uma ação de retenção com o valor de um cliente perdido, e não da maximização de uma métrica.
 
+**Limiares de negócio (capacidade da equipa).** A equipa de retenção só consegue contactar uma fração da base. Por isso há, além de 0,5 e do melhor F1, dois limiares definidos pela capacidade: o valor de P(churn) que sinaliza exatamente os **top 10%** e os **top 20%** dos clientes (`capacity_thresholds`). Os quatro limiares são fixados nas previsões out-of-fold do treino (`11e_limiares_negocio_cv.csv`) e aplicados uma vez ao holdout (`13b_limiares_negocio_holdout.csv`), com precision, recall e F1 em cada corte. Os mesmos cortes definem os **segmentos de risco** usados na app: *alto* = top 10%, *médio* = top 10–20%, *baixo* = restantes (`risk_segment`; guardados no `final_model.joblib` em `risk_cuts`).
+
 ## Decisões de retenção: o que é dado e o que é pressuposto
 
 - **P × CLTV vs só P.** A tabela `15b_P_vs_PxCLTV.csv` mostra quantos clientes as duas listas têm em comum e que % dos churners e do CLTV perdido cada uma cobre. A comparação com o IBM faz-se sempre entre ordenações do mesmo tipo (P × CLTV com Churn Score × CLTV; só P com só Churn Score).
-- **Quantos contactar.** Depende de dois **pressupostos** que o dataset não tem: a taxa de sucesso do contacto e o custo por contacto (incluindo o incentivo). Estão numa célula de parâmetros do notebook 02 (secção 11.2) e em `CENARIOS`, no topo de `scripts/run_modelling.py`, com três cenários e uma grelha de sensibilidade. O N de cada cenário vem da regra do valor esperado (contactar se P × CLTV × taxa_sucesso > custo) e é verificado com o ótimo observado no holdout.
+- **Quantos contactar.** Depende de dois **pressupostos** que o dataset não tem: a taxa de sucesso do contacto e o custo por contacto (incluindo o incentivo). Estão definidos uma só vez em `retention.CENARIOS` (usados pelo notebook 02, secção 11.2, e por `scripts/run_modelling.py`), com três cenários e uma grelha de sensibilidade. O N de cada cenário vem da regra do valor esperado (contactar se P × CLTV × taxa_sucesso > custo) e é verificado com o ótimo observado no holdout.
 - **Ações por segmento** (`retention.suggest_action`) e **regra de onboarding** (`retention.onboarding_segment`) são hipóteses de negócio. A importância das variáveis mostra o que o modelo usa para ordenar clientes, não o efeito causal de mudar essas variáveis. Cada ação deve ser testada com um grupo de controlo sorteado (por exemplo 20% de cada segmento sem contacto), e a diferença de churn entre os dois grupos substitui a taxa de sucesso assumida.
 
 ## Limitações e decisões a declarar no relatório
 
 - **Brier e log loss do IBM.** `Churn Score / 100` não é uma probabilidade calibrada, por isso o Brier e o log loss do IBM só servem como referência. A comparação justa com o IBM é pelas métricas de ordenação (ROC AUC, PR AUC) e pela curva de captura.
+- **O modelo não bate o IBM em ROC AUC.** Avaliado nos mesmos folds, o Churn Score IBM tem AUC 0,942 ± 0,008 em CV, contra 0,938 ± 0,004 do Gradient Boosting; no holdout, 0,941 contra 0,936. A diferença (≈ 0,005) é menor do que o desvio-padrão da IBM entre folds (0,008), mas maior do que o do modelo (0,004). Pela regra de empate da seleção (`tied_with_best`, que usa o desvio-padrão do melhor dos dois), em ordenação estão **empatados**; o teste `test_nao_e_pior_do_que_o_churn_score_ibm` usa exatamente esta tolerância. O modelo é melhor em PR AUC (0,883 vs 0,876 no holdout) e muito melhor em calibração (Brier 0,087 vs 0,214), o que conta para a priorização por P × CLTV. A regra de negócio sem ML fica bem abaixo (AUC 0,84), o que mostra que o modelo acrescenta valor face a uma regra simples.
 - **O IBM nos clientes estabelecidos.** O Churn Score IBM mantém um AUC próximo de 0,94 nos clientes com tenure > 3, acima dos nossos modelos (≈ 0,90). Não sabemos com que informação foi calculado: pode usar variáveis que não temos ou informação posterior ao churn. Fica como benchmark e não como feature.
 - **Validação cruzada não aninhada.** O tuning e a comparação dos modelos usam os mesmos folds do treino, por isso o AUC em CV do vencedor é ligeiramente otimista. Optámos por não usar CV aninhada (seria 5× mais lenta) porque a escolha final é confirmada uma única vez no holdout, que não entrou no tuning.
 - **Utilização do holdout.** O holdout não é usado para escolher modelos nem hiperparâmetros. É usado, depois das escolhas feitas, para: as métricas finais dos dois modelos e do IBM; a variante com Satisfaction Score (só para documentar o leakage); a permutation importance; a curva de captura, a comparação P vs P × CLTV e o ótimo observado da análise custo-benefício. Os pressupostos de negócio não são afinados no holdout.
@@ -104,7 +116,7 @@ As métricas com limiar usam 0,5 por convenção. Com 28% de churn, esse limiar 
 | Ficheiro | O que mostra |
 |---|---|
 | `20_diversidade_modelos.png` | Correlação entre as probabilidades dos modelos (base para os ensembles) |
-| `21_cv_modelos.png` | ROC AUC em CV ± desvio-padrão, com a fasquia IBM |
+| `21_cv_modelos.png` | ROC AUC em CV ± desvio-padrão, com as referências (regra de negócio a cinzento, IBM a preto) |
 | `22_painel_metricas_cv.png` | As nove métricas por modelo, em CV, com o valor de treino como losango |
 | `22b_heatmap_metricas_cv.png` | Grelha modelo × métrica, colorida pela posição em cada métrica |
 | `23_sobreajuste.png` | ROC AUC no treino vs em CV: a distância mede o sobreajuste |
@@ -129,12 +141,15 @@ As métricas com limiar usam 0,5 por convenção. Com 28% de churn, esse limiar 
 | `11_cv_modelos.csv` | Nove métricas por modelo: média e desvio em CV, média no treino |
 | `11b_limiares_modelo_final.csv` | Precision, recall, F1 e % sinalizados por limiar |
 | `11c_correlacao_modelos.csv` | Correlação entre as probabilidades out-of-fold |
+| `11d_selecao_modelo.csv` | Regra de parcimónia: AUC, ordem de complexidade, empatados e modelo escolhido |
+| `11e_limiares_negocio_cv.csv` | Precision/recall/F1 nos limiares 0,5, melhor F1, top 10% e top 20% (out-of-fold) |
 | `12_variantes_satisfaction_city.csv` | Efeito do Satisfaction Score e de City |
-| `13_holdout.csv` | Nove métricas no holdout, para todos os modelos e para o IBM |
+| `13_holdout.csv` | Nove métricas no holdout, para todos os modelos e para as referências |
+| `13b_limiares_negocio_holdout.csv` | Os mesmos quatro limiares, aplicados ao holdout |
 | `14_importancia_permutacao.csv` | Queda de AUC por variável |
 | `15_captura_valor.csv` | Captura de valor nos top 10/20/30% (clientes estabelecidos) |
 | `15b_P_vs_PxCLTV.csv` | Lista por P vs lista por P × CLTV: clientes em comum, churners e CLTV cobertos |
-| `16_tuning_estabelecidos.csv`, `16b_cv_modelos_estabelecidos.csv` | Tuning e CV do modelo de priorização |
+| `16_tuning_estabelecidos.csv`, `16b_cv_modelos_estabelecidos.csv`, `16c_selecao_modelo_estabelecidos.csv` | Tuning, CV e seleção do modelo de priorização |
 | `17_comparacao_core_priorizacao.csv` | Modelo core vs modelo de priorização vs IBM, por conjunto do holdout |
 | `18_importancia_priorizacao.csv` | Queda de AUC por variável no modelo de priorização |
 | `19_regra_onboarding.csv` | Segmentos de onboarding dos clientes novos e taxa de saída |

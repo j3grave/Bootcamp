@@ -5,7 +5,8 @@ por engano, os gráficos da outra. Todos guardam a figura em outputs/figures/ vi
 
 Convenção de cores:
     azul  = modelos individuais        verde = ensembles e modelo final
-    cinzento = linha de base           preto/tinta = benchmark IBM e linhas de referência
+    cinzento = linhas de base (Dummy e regra de negócio)
+    preto/tinta = benchmark IBM e linhas de referência
 """
 import math
 
@@ -17,7 +18,7 @@ from matplotlib.ticker import PercentFormatter
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import confusion_matrix, precision_recall_curve, roc_auc_score, roc_curve
 
-from .modelling import (BASELINE, ENSEMBLES, LOWER_IS_BETTER, METRICS, THRESHOLD_GRID,
+from .modelling import (BASELINE, BENCHMARK, ENSEMBLES, RULE_BASELINE, LOWER_IS_BETTER, METRICS, THRESHOLD_GRID,
                         threshold_table)
 from .style import BG, BLUE, GREEN, GREY, GRID, INK, save_fig
 
@@ -33,8 +34,10 @@ METRIC_TITLES = {
 
 
 def _color(model: str, best: str | None = None) -> str:
-    if model == BASELINE:
+    if model in (BASELINE, RULE_BASELINE):
         return GREY
+    if model == BENCHMARK:
+        return INK
     if model == best or model in ENSEMBLES or model.startswith(tuple(ENSEMBLES)):
         return GREEN
     return BLUE
@@ -58,10 +61,10 @@ def _annotate_cells(ax, text, dark, fontsize: int = 8) -> None:
 
 
 # --- Comparação geral --------------------------------------------------------------------
-def plot_cv_comparison(cv: pd.DataFrame, benchmark_auc: float | None = None,
-                       name: str = "21_cv_modelos",
+def plot_cv_comparison(cv: pd.DataFrame, name: str = "21_cv_modelos",
                        title: str = "AUC em validação cruzada (5-fold, treino)", show: bool = True):
-    """AUC médio ± desvio-padrão por modelo. Ensembles a verde; benchmark a tracejado."""
+    """AUC médio ± desvio-padrão por modelo, com as referências (regra de negócio a cinzento,
+    Churn Score IBM a preto, avaliado nos mesmos folds). Ensembles a verde."""
     cv = cv.drop(index=BASELINE, errors="ignore").sort_values("auc")
     colors = [_color(i) for i in cv.index]
     fig, ax = plt.subplots(figsize=(7.5, 0.42 * len(cv) + 1.2))
@@ -70,12 +73,7 @@ def plot_cv_comparison(cv: pd.DataFrame, benchmark_auc: float | None = None,
     errs = cv["auc_std"] if "auc_std" in cv else pd.Series(0, index=cv.index)
     for i, (v, e) in enumerate(zip(cv["auc"], errs)):
         ax.text(v + e, i, f"  {v:.3f}", va="center", color=INK, fontsize=8)
-    lo = cv["auc"].min()
-    if benchmark_auc is not None:
-        ax.axvline(benchmark_auc, color=INK, linestyle="--", linewidth=1)
-        ax.text(benchmark_auc, len(cv) - 0.4, " IBM", color=INK, fontsize=8)
-        lo = min(lo, benchmark_auc)
-    ax.set_xlim(lo - 0.03, 1.0)
+    ax.set_xlim(cv["auc"].min() - 0.03, 1.0)
     ax.set_title(title)
     ax.set_xlabel("ROC AUC")
     save_fig(fig, name, show)
