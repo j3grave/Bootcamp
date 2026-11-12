@@ -153,7 +153,7 @@ pytest tests/test_data.py -v             # só os contratos de dados
 |---|---|
 | `tests/test_data.py` | Os ficheiros reais cumprem os contratos; derivações a 100%; merge 1:1; um valor fora do domínio (ex.: `Satisfaction Score = 9`) faz a pipeline parar |
 | `tests/test_preprocessing.py` | Treino e teste disjuntos e estratificados; sem leakage nas features; sem NaN depois do pré-processador; `add_features` calculada linha a linha |
-| `tests/test_model.py` | Sobre `final_model.joblib` e `priority_model.joblib`, sem retreinar: o lote separa clientes estabelecidos (modelo de priorização) e novos (lista de onboarding); cortes de capacidade sobre tenure > 3; bate a Dummy e a regra de negócio; não é pior do que o Churn Score IBM (AUC dentro do desvio-padrão da IBM em CV, PR AUC ≥, Brier <); sobreajuste < 0,05; aceita uma linha do formulário e devolve P em [0, 1] |
+| `tests/test_model.py` | Sobre `final_model.joblib` e `priority_model.joblib`, sem retreinar: o lote separa clientes estabelecidos (modelo de priorização) e novos (lista de onboarding); cortes de capacidade sobre tenure > 3; modelo de priorização com gate próprio (bate a Dummy e a regra, sobreajuste < 0,05, Brier < IBM, níveis calibrados; a IBM fica como reporte porque ordena melhor nos estabelecidos); bate a Dummy e a regra de negócio; não é pior do que o Churn Score IBM (AUC dentro do desvio-padrão da IBM em CV, PR AUC ≥, Brier <); sobreajuste < 0,05; aceita uma linha do formulário e devolve P em [0, 1] |
 | `tests/test_app.py` | Decisão do desconto nos casos limite (P = 0, P = 1, custo = 0, eficácia = 0, empate, valores inválidos) |
 
 ### 4. Correr a app localmente

@@ -41,7 +41,8 @@ def holdout(bundle):
 
 def test_artefacto_de_priorizacao_tem_as_chaves_da_app(priority):
     expected = {"model", "name", "features", "target", "cv", "holdout", "selection",
-                "risk_levels", "capacity_cuts", "form", "cltv_median", "population"}
+                "risk_levels", "capacity_cuts", "form", "cltv_median", "population",
+                "benchmark_cv", "benchmark_holdout", "bootstrap_vs_ibm"}
     assert expected <= set(priority)
 
 
@@ -128,6 +129,25 @@ def test_lote_pequeno_ou_so_com_novos(bundle, priority, holdout):
     assert len(est) == 0 and len(new) == 5
 
 
+# --- Gate do modelo de priorização (decisão do grupo) -------------------------------------
+# O deploy exige: bater a Dummy e a regra de negócio, sobreajuste < 0,05, Brier < IBM e níveis
+# de risco calibrados. NÃO exige não inferioridade face à IBM: nos clientes estabelecidos a IBM
+# ordena melhor (AUC 0,939 vs 0,899, IC 95% da diferença sem o zero). Isso fica reportado
+# (17d_bootstrap_auc_priorizacao_vs_ibm.csv, MODEL_CARD, app) e não bloqueia a publicação.
+# Ver docs/modelling.md, "Gate do modelo de priorização".
+
+def test_priorizacao_sobreajuste_controlado(priority):
+    gap = priority["cv"]["auc_train"] - priority["cv"]["auc"]
+    assert gap < MAX_TRAIN_CV_GAP, f"AUC treino − CV = {gap:.3f}"
+
+
+def test_priorizacao_mais_bem_calibrada_do_que_a_ibm(priority, holdout):
+    """P(churn) × CLTV precisa de probabilidades realistas: Brier melhor do que o da IBM."""
+    est = holdout["test"][holdout["test"]["Tenure in Months"] > 3]
+    p = scoring.predict(priority, est)
+    assert brier_score_loss(est["churn"], p) < brier_score_loss(est["churn"], est["Churn Score"] / 100)
+
+
 def test_modelo_de_priorizacao_bate_a_regra_nos_estabelecidos(priority, holdout):
     test, train = holdout["test"], holdout["train"]
     est_te, est_tr = test[test["Tenure in Months"] > 3], train[train["Tenure in Months"] > 3]
@@ -135,6 +155,7 @@ def test_modelo_de_priorizacao_bate_a_regra_nos_estabelecidos(priority, holdout)
     rule = modelling.BusinessRuleScore().fit(est_tr, est_tr["churn"])
     auc = roc_auc_score(est_te["churn"], p)
     assert auc == pytest.approx(priority["holdout"]["auc"])
+    assert auc > 0.5   # Dummy
     assert auc > roc_auc_score(est_te["churn"], rule.predict_proba(est_te)[:, 1])
 
 

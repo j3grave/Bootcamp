@@ -36,7 +36,9 @@ def metrics_section(bundle: dict, priority: dict) -> str:
     rows = [("Modelo core: " + bundle["name"], bundle["cv"], bundle["holdout"]),
             ("Churn Score IBM (benchmark)", bundle["benchmark_cv"], bundle["benchmark_holdout"]),
             ("Modelo de priorização (tenure > 3): " + priority["name"], priority["cv"],
-             priority["holdout"])]
+             priority["holdout"]),
+            ("Churn Score IBM nos mesmos clientes (tenure > 3)", priority["benchmark_cv"],
+             priority["benchmark_holdout"])]
     lines = ["## Métricas desta versão", "",
              f"Seleção: {bundle['selection']}", "",
              "| | AUC CV (± dp) | AUC holdout | PR AUC holdout | Brier holdout |",
@@ -45,7 +47,11 @@ def metrics_section(bundle: dict, priority: dict) -> str:
         h = f"{hold['auc']:.3f} | {hold['pr_auc']:.3f} | {hold['brier']:.3f}"
         lines.append(f"| {name} | {cv['auc']:.3f} ± {cv['auc_std']:.3f} | {h} |")
     lv, cap = priority["risk_levels"], priority["capacity_cuts"]
-    lines += ["", "O modelo de priorização é avaliado no holdout com tenure > 3.", "",
+    b = priority["bootstrap_vs_ibm"]
+    lines += ["", "O modelo de priorização e a sua linha IBM são avaliados no holdout com "
+                  "tenure > 3. Nesses clientes a IBM ordena melhor: diferença de AUC "
+                  f"{b['diferenca']:+.3f}, IC 95% [{b['ic_inferior']:+.3f}; {b['ic_superior']:+.3f}] "
+                  "(bootstrap emparelhado). Não é gate do deploy.", "",
               f"Nível de risco (absoluto): baixo < {lv['médio']:.0%}, médio "
               f"{lv['médio']:.0%}–{lv['alto']:.0%}, alto ≥ {lv['alto']:.0%}. "
               f"Prioridade de contacto (capacidade, só clientes estabelecidos, modelo de "
