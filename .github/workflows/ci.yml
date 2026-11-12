@@ -26,4 +26,4 @@ jobs:
         run: pip install -r requirements-lock.txt
 
       - name: Testes (dados, pré-processamento e app)
-        run: pytest tests/test_data.py tests/test_preprocessing.py tests/test_app.py -v
+        run: pytest tests/test_data.py tests/test_preprocessing.py tests/test_app.py tests/test_bootstrap.py -v

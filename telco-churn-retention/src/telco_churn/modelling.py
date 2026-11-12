@@ -492,6 +492,33 @@ def holdout_report(probas: dict, y: pd.Series, benchmark: pd.Series) -> pd.DataF
     return pd.DataFrame(rows).T.sort_values("auc", ascending=False)
 
 
+def paired_bootstrap_auc_diff(y, p_model, p_reference, n_boot: int = 2000,
+                              random_state: int = RANDOM_STATE, level: float = 0.95) -> dict:
+    """Intervalo de confiança (bootstrap emparelhado) para AUC(modelo) − AUC(referência).
+
+    Em cada reamostra sorteiam-se clientes com reposição e calculam-se as duas AUC nos MESMOS
+    clientes, por isso a variação da amostra afeta os dois scores da mesma forma. O intervalo
+    é o percentil (2,5% e 97,5% para 95%). Se incluir zero, a diferença não é
+    estatisticamente distinguível de zero neste holdout. É um reporte: não decide nada.
+    """
+    y, a, b = np.asarray(y), np.asarray(p_model, dtype=float), np.asarray(p_reference, dtype=float)
+    rng = np.random.default_rng(random_state)
+    diffs = []
+    for _ in range(n_boot):
+        i = rng.integers(0, len(y), len(y))
+        if y[i].min() == y[i].max():   # reamostra só com uma classe: AUC indefinida
+            continue
+        diffs.append(metrics.roc_auc_score(y[i], a[i]) - metrics.roc_auc_score(y[i], b[i]))
+    diffs = np.array(diffs)
+    tail = (1 - level) / 2
+    low, high = np.quantile(diffs, [tail, 1 - tail])
+    return {"auc_modelo": metrics.roc_auc_score(y, a), "auc_referencia": metrics.roc_auc_score(y, b),
+            "diferenca": metrics.roc_auc_score(y, a) - metrics.roc_auc_score(y, b),
+            "ic_inferior": low, "ic_superior": high, "nivel": level,
+            "reamostras": len(diffs), "pct_reamostras_modelo_melhor": float(np.mean(diffs > 0)),
+            "ic_inclui_zero": bool(low <= 0 <= high), "random_state": random_state}
+
+
 def comparison_table(rows: list) -> pd.DataFrame:
     """Métricas de vários modelos, cada um no conjunto de clientes indicado.
 

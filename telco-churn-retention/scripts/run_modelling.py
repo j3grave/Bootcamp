@@ -140,6 +140,12 @@ def stage_holdout(d, models, best, model_sat, city_model, use_city, thresholds):
     # Os mesmos limiares, fixados na CV, aplicados uma vez ao holdout
     modelling.decision_table(y_test, p_test, thresholds).to_csv(
         TAB_DIR / "13b_limiares_negocio_holdout.csv")
+    # Reporte (não decide nada): IC 95% da diferença de AUC face ao IBM, bootstrap emparelhado
+    boot = modelling.paired_bootstrap_auc_diff(y_test, p_test, d.test["Churn Score"] / 100)
+    pd.DataFrame([boot], index=[f"{best} − {modelling.BENCHMARK}"]).to_csv(
+        TAB_DIR / "13d_bootstrap_auc_vs_ibm.csv")
+    step(f"AUC modelo − IBM: {boot['diferenca']:+.4f}, IC 95% [{boot['ic_inferior']:+.4f}, "
+         f"{boot['ic_superior']:+.4f}] (inclui zero: {boot['ic_inclui_zero']})")
     # Níveis de risco absolutos (30% / 60%): a taxa de churn real confirma a leitura de P
     modelling.risk_level_table(y_test, p_test).to_csv(TAB_DIR / "13c_niveis_risco_holdout.csv")
     model_plots.plot_roc_calibration(y_test, {

@@ -139,6 +139,21 @@ Os valores são do holdout. O desvio-padrão da IBM vem da CV de 5 folds no trei
 - **É a mesma regra da seleção.** `tied_with_best` considera empatados dois modelos cuja diferença é menor do que o desvio-padrão do melhor dos dois, e o melhor aqui é a IBM. O teste não inventa uma tolerância nova; aplica à IBM a regra que já se aplica aos modelos.
 - **A tolerância usa o desvio-padrão da IBM, não o do modelo.** O do modelo (0,0040) é menor do que a diferença, por isso, medida contra ele, a diferença não seria ruído. A escolha segue a regra de seleção (o desvio-padrão do melhor) e fica declarada aqui para não parecer feita à medida.
 
+**Intervalo de confiança da diferença de AUC (reporte, não gate).** Para medir a incerteza diretamente no holdout, calcula-se um intervalo de confiança a 95% para AUC(modelo) − AUC(IBM) por **bootstrap emparelhado** (`modelling.paired_bootstrap_auc_diff`):
+
+- em cada uma das 2000 reamostras sorteiam-se 1318 clientes do holdout com reposição;
+- as duas AUC calculam-se nos **mesmos** clientes, por isso a sorte da amostra afeta os dois scores da mesma forma;
+- `random_state = 42`, o que torna o resultado reprodutível;
+- o intervalo é o dos percentis 2,5% e 97,5%.
+
+| Diferença observada | IC 95% | Reamostras em que o modelo é melhor | O IC inclui zero? |
+|---|---|---|---|
+| −0,0046 | [−0,0217; +0,0121] | 28% | **sim** |
+
+O intervalo inclui zero, por isso **a diferença de AUC não é estatisticamente distinguível de zero** neste holdout. Isto suporta o "empate" por um caminho independente da regra do desvio-padrão em CV. A largura do intervalo (≈ 0,034) também mostra que, com 1318 clientes, só uma diferença de AUC de vários centésimos seria detetável.
+
+O resultado fica em `outputs/tables/13d_bootstrap_auc_vs_ibm.csv`. É só um reporte: **não entra no teste nem decide o deploy**, que continua a usar as três condições acima. Os testes em `tests/test_bootstrap.py` verificam o método (scores iguais dão diferença 0, um score claramente melhor dá um IC acima de 0, e o resultado repete-se com o mesmo `random_state`), e não o valor face à IBM.
+
 **Porque também se exigem PR AUC e Brier.** Um modelo empatado em AUC não chega para justificar trocar o score existente. Exige-se ainda:
 
 - **PR AUC pelo menos igual.** É a ordenação com foco nos churners, que é o que a equipa de retenção usa.
@@ -205,6 +220,7 @@ O relatório deve dizer "empatado com a IBM em AUC, melhor em PR AUC e em calibr
 | `13_holdout.csv` | Nove métricas no holdout, para todos os modelos e para as referências |
 | `13b_limiares_negocio_holdout.csv` | Os mesmos quatro limiares, aplicados ao holdout |
 | `13c_niveis_risco_holdout.csv` | Clientes, P média e churn real por nível de risco (baixo/médio/alto) |
+| `13d_bootstrap_auc_vs_ibm.csv` | IC 95% (bootstrap emparelhado) da diferença de AUC entre o modelo e o IBM no holdout |
 | `14_importancia_permutacao.csv` | Queda de AUC por variável |
 | `15_captura_valor.csv` | Captura de valor nos top 10/20/30% (clientes estabelecidos) |
 | `15b_P_vs_PxCLTV.csv` | Lista por P vs lista por P × CLTV: clientes em comum, churners e CLTV cobertos |
