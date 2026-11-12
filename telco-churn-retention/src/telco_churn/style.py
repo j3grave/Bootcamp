@@ -26,8 +26,6 @@ TARGET_LABELS = {0: "Stayed", 1: "Churned"}
 
 # Mapa divergente azul -> fundo -> verde (correlações)
 CMAP_DIVERGING = LinearSegmentedColormap.from_list("blue_bg_green", [BLUE, BG, GREEN])
-# Mapa sequencial fundo -> azul -> verde (intensidades)
-CMAP_SEQUENTIAL = LinearSegmentedColormap.from_list("bg_blue_green", [BG, BLUE, GREEN])
 
 RC = {
     "figure.facecolor": BG, "axes.facecolor": BG, "savefig.facecolor": BG,
@@ -45,7 +43,7 @@ RC = {
 
 
 def apply_theme() -> None:
-    """Aplica o tema escuro com a paleta do projeto a todos os gráficos."""
+    """Aplica o tema definido em THEME, com a paleta do projeto, a todos os gráficos."""
     sns.set_theme(context="notebook", style="whitegrid" if THEME == "light" else "darkgrid", rc=RC)
     plt.rcParams.update(RC)
 

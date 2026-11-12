@@ -5,6 +5,9 @@ from .config import TARGET
 
 ID_COLS = ["Customer ID"]
 
+# Colunas de negócio guardadas em train/test ao lado das features (não entram no modelo)
+BUSINESS_COLS = ["Customer ID", "CLTV", "Churn Score", "Satisfaction Score"]
+
 # Codificam o resultado ou só existem depois do churn -> nunca entram no modelo
 LEAKAGE_COLS = ["Customer Status", "Churn Label", "Churn Value", "Churn Category", "Churn Reason"]
 
@@ -26,6 +29,12 @@ ADD_ONS = ["Online Security", "Online Backup", "Device Protection Plan", "Premiu
 NEW_NUM = ["n_add_on_services", "avg_hist_charge", "charge_delta"]
 NEW_CAT = ["has_refund"]
 
+# Os Joined têm todos 1 a 3 meses de casa. Um cliente novo que ficou é rotulado Joined (e sai
+# da população core); um cliente novo que saiu é rotulado Churned (e fica). Por isso, dentro de
+# Churned + Stayed, tenure <= 3 significa quase sempre churn: é um efeito da forma como os
+# estados foram definidos, não um padrão de comportamento.
+NEW_CUSTOMER_MAX_TENURE = 3
+
 
 def split_population(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Separa Churned/Stayed (modelação) de Joined (scoring) e cria o target binário."""
@@ -35,23 +44,39 @@ def split_population(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return df_model, df_joined
 
 
+def is_established(df: pd.DataFrame) -> pd.Series:
+    """True para clientes com mais de NEW_CUSTOMER_MAX_TENURE meses de casa."""
+    return df["Tenure in Months"] > NEW_CUSTOMER_MAX_TENURE
+
+
+def tenure_status_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Nº de clientes por faixa de tenure e Customer Status, com a taxa de churn core.
+
+    A taxa usa só Churned e Stayed, como o modelo core. Mostra o artefacto dos clientes novos.
+    """
+    faixa = is_established(df).map({False: f"1–{NEW_CUSTOMER_MAX_TENURE} meses",
+                                     True: f"{NEW_CUSTOMER_MAX_TENURE + 1} ou mais meses"})
+    table = pd.crosstab(faixa.rename("tenure"), df["Customer Status"])
+    table["taxa_churn_core"] = table["Churned"] / (table["Churned"] + table["Stayed"])
+    return table
+
+
 def feature_roles(df: pd.DataFrame) -> tuple[list[str], list[str], pd.DataFrame]:
     """Devolve (numéricas, categóricas, tabela de papéis)."""
-    exclude = set(ID_COLS + LEAKAGE_COLS + MODEL_DERIVED_COLS + SUSPECT_COLS
-                  + REDUNDANT_COLS + [TARGET])
+    excluded = {
+        "id": ID_COLS,
+        "leakage": LEAKAGE_COLS,
+        "derivada de modelo (benchmark)": MODEL_DERIVED_COLS,
+        "suspeita de leakage": SUSPECT_COLS,
+        "redundante": REDUNDANT_COLS,
+    }
+    exclude = {c for cols in excluded.values() for c in cols} | {TARGET}
     num = [c for c in df.select_dtypes(include="number").columns if c not in exclude]
     cat = [c for c in df.columns if c not in exclude and c not in num]
-    roles = pd.DataFrame(
-        [(c, "id") for c in ID_COLS]
-        + [(c, "leakage") for c in LEAKAGE_COLS]
-        + [(c, "derivada de modelo (benchmark)") for c in MODEL_DERIVED_COLS]
-        + [(c, "suspeita de leakage") for c in SUSPECT_COLS]
-        + [(c, "redundante") for c in REDUNDANT_COLS]
-        + [(c, "numérica") for c in num]
-        + [(c, "categórica") for c in cat],
-        columns=["variavel", "papel"],
-    )
-    return num, cat, roles
+    roles = excluded | {"numérica": num, "categórica": cat}
+    table = pd.DataFrame([(c, papel) for papel, cols in roles.items() for c in cols],
+                         columns=["variavel", "papel"])
+    return num, cat, table
 
 
 def add_features(data: pd.DataFrame) -> pd.DataFrame:

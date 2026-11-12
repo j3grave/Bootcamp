@@ -1,4 +1,4 @@
-"""Gráficos da EDA com a paleta do projeto (fundo preto, azul e verde)."""
+"""Gráficos da EDA com a paleta e o tema de style.py (azul e verde)."""
 import math
 
 import matplotlib.pyplot as plt

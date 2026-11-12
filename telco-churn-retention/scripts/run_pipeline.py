@@ -13,7 +13,7 @@ matplotlib.use("Agg")
 
 from sklearn.metrics import roc_auc_score
 
-from telco_churn import analysis, data, features, plots, preprocessing
+from telco_churn import analysis, data, features, plots, preprocessing, schemas
 from telco_churn.config import RANDOM_STATE, TAB_DIR, TARGET, ensure_dirs
 from telco_churn.style import apply_theme
 
@@ -30,6 +30,9 @@ def main() -> None:
 
     df_model, df_joined = features.split_population(df)
     rate = df_model[TARGET].mean()
+    tenure_status = features.tenure_status_table(df)
+    tenure_status.to_csv(TAB_DIR / "02b_tenure_estado.csv")
+    print(tenure_status.to_string(), "\n")
     num, cat, roles = features.feature_roles(df_model)
     roles.to_csv(TAB_DIR / "02_papeis_variaveis.csv", index=False)
     plots.plot_target(df_model[TARGET], show=False)
@@ -56,12 +59,15 @@ def main() -> None:
     df_joined = features.add_features(df_joined)
     f_num, f_cat = num + features.NEW_NUM, cat + features.NEW_CAT
 
-    X_tr, X_te, y_tr, y_te, i_tr, i_te = preprocessing.stratified_split(
+    X_tr, X_te, _, y_te, i_tr, i_te = preprocessing.stratified_split(
         df_model, f_num + f_cat, TARGET)
     prep = preprocessing.build_preprocessors(f_num, f_cat)
     prep["trees"].fit(X_tr)
 
-    cols = ["Customer ID", "CLTV", "Churn Score", "Satisfaction Score"] + f_num + f_cat + [TARGET]
+    cols = features.BUSINESS_COLS + f_num + f_cat + [TARGET]
+    forbidden = features.LEAKAGE_COLS + features.MODEL_DERIVED_COLS + features.SUSPECT_COLS
+    schemas.enforce(schemas.validate_split(df_model.loc[i_tr, cols], df_model.loc[i_te, cols],
+                                           f_num + f_cat, prep["trees"], forbidden))
     preprocessing.export_artifacts(
         df_model.loc[i_tr, cols], df_model.loc[i_te, cols], df_joined, df,
         {"preprocessors": prep, "features_num": f_num, "features_cat": f_cat,
@@ -75,4 +81,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except schemas.DataValidationError as e:   # contrato de dados violado: parar sem traceback
+        sys.exit(f"\n{e}")

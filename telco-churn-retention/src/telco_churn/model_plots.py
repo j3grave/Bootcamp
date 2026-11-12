@@ -5,7 +5,8 @@ por engano, os gráficos da outra. Todos guardam a figura em outputs/figures/ vi
 
 Convenção de cores:
     azul  = modelos individuais        verde = ensembles e modelo final
-    cinzento = linha de base           preto/tinta = benchmark IBM e linhas de referência
+    cinzento = linhas de base (Dummy e regra de negócio)
+    preto/tinta = benchmark IBM e linhas de referência
 """
 import math
 
@@ -17,7 +18,8 @@ from matplotlib.ticker import PercentFormatter
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import confusion_matrix, precision_recall_curve, roc_auc_score, roc_curve
 
-from .modelling import BASELINE, ENSEMBLES, LOWER_IS_BETTER, METRICS
+from .modelling import (BASELINE, BENCHMARK, ENSEMBLES, RULE_BASELINE, LOWER_IS_BETTER, METRICS, THRESHOLD_GRID,
+                        threshold_table)
 from .style import BG, BLUE, GREEN, GREY, GRID, INK, save_fig
 
 LIGHT_BLUE = "#AFC8FF"
@@ -32,18 +34,37 @@ METRIC_TITLES = {
 
 
 def _color(model: str, best: str | None = None) -> str:
-    if model == BASELINE:
+    if model in (BASELINE, RULE_BASELINE):
         return GREY
+    if model == BENCHMARK:
+        return INK
     if model == best or model in ENSEMBLES or model.startswith(tuple(ENSEMBLES)):
         return GREEN
     return BLUE
 
 
+def _label_bars(ax, vals, xmax: float) -> None:
+    """Escreve o valor de cada barra: dentro (a branco) se couber, senão à direita."""
+    for i, v in enumerate(vals):
+        if v > 0.3 * xmax:   # dentro da barra, para não colidir com o losango do treino
+            ax.text(v - xmax * 0.015, i, f"{v:.3f}", va="center", ha="right",
+                    color="#FFFFFF", fontsize=7, fontweight="bold")
+        else:
+            ax.text(v + xmax * 0.015, i, f"{v:.3f}", va="center", color=INK, fontsize=7)
+
+def _annotate_cells(ax, text, dark, fontsize: int = 8) -> None:
+    """Escreve o texto de cada célula de uma grelha (imshow); a branco nas células escuras."""
+    for i, row in enumerate(text):
+        for j, label in enumerate(row):
+            ax.text(j, i, label, ha="center", va="center", fontsize=fontsize,
+                    color="#FFFFFF" if dark[i][j] else INK)
+
+
 # --- Comparação geral --------------------------------------------------------------------
-def plot_cv_comparison(cv: pd.DataFrame, benchmark_auc: float | None = None,
-                       name: str = "21_cv_modelos",
+def plot_cv_comparison(cv: pd.DataFrame, name: str = "21_cv_modelos",
                        title: str = "AUC em validação cruzada (5-fold, treino)", show: bool = True):
-    """AUC médio ± desvio-padrão por modelo. Ensembles a verde; benchmark a tracejado."""
+    """AUC médio ± desvio-padrão por modelo, com as referências (regra de negócio a cinzento,
+    Churn Score IBM a preto, avaliado nos mesmos folds). Ensembles a verde."""
     cv = cv.drop(index=BASELINE, errors="ignore").sort_values("auc")
     colors = [_color(i) for i in cv.index]
     fig, ax = plt.subplots(figsize=(7.5, 0.42 * len(cv) + 1.2))
@@ -52,12 +73,7 @@ def plot_cv_comparison(cv: pd.DataFrame, benchmark_auc: float | None = None,
     errs = cv["auc_std"] if "auc_std" in cv else pd.Series(0, index=cv.index)
     for i, (v, e) in enumerate(zip(cv["auc"], errs)):
         ax.text(v + e, i, f"  {v:.3f}", va="center", color=INK, fontsize=8)
-    lo = cv["auc"].min()
-    if benchmark_auc is not None:
-        ax.axvline(benchmark_auc, color=INK, linestyle="--", linewidth=1)
-        ax.text(benchmark_auc, len(cv) - 0.4, " IBM", color=INK, fontsize=8)
-        lo = min(lo, benchmark_auc)
-    ax.set_xlim(lo - 0.03, 1.0)
+    ax.set_xlim(cv["auc"].min() - 0.03, 1.0)
     ax.set_title(title)
     ax.set_xlabel("ROC AUC")
     save_fig(fig, name, show)
@@ -86,14 +102,10 @@ def plot_metrics_panel(view: pd.DataFrame, std: pd.DataFrame | None = None,
         if train is not None:
             ax.scatter(train.loc[order, m].astype(float), order, marker="D", s=18,
                        facecolor=BG, edgecolor=INK, linewidth=1, zorder=3)
-        top = max(vals.max(), train[m].max() if train is not None else 0)
-        xmax = top * 1.28 if m in LOWER_IS_BETTER else 1.12
-        for i, v in enumerate(vals):
-            if v > 0.3 * xmax:   # valor dentro da barra, para não colidir com o losango
-                ax.text(v - xmax * 0.015, i, f"{v:.3f}", va="center", ha="right",
-                        color="#FFFFFF", fontsize=7, fontweight="bold")
-            else:
-                ax.text(v + xmax * 0.015, i, f"{v:.3f}", va="center", color=INK, fontsize=7)
+        xmax = 1.12
+        if m in LOWER_IS_BETTER:   # métricas sem teto natural: escala pelo maior valor
+            xmax = 1.28 * max(vals.max(), train[m].max() if train is not None else 0)
+        _label_bars(ax, vals, xmax)
         ax.set_xlim(0, xmax)
         better = "menor" if m in LOWER_IS_BETTER else "maior"
         ax.set_title(f"{METRIC_TITLES[m]}  ·  {better} é melhor", fontsize=9)
@@ -116,11 +128,7 @@ def plot_metrics_heatmap(view: pd.DataFrame, name: str = "22b_heatmap_metricas_c
     rank[LOWER_IS_BETTER] = view[LOWER_IS_BETTER].rank(pct=True, ascending=False)
     fig, ax = plt.subplots(figsize=(12, 0.45 * len(view) + 1.6))
     ax.imshow(rank.values, cmap=CMAP_BLUE, aspect="auto", vmin=0, vmax=1.05)
-    for i in range(view.shape[0]):
-        for j in range(view.shape[1]):
-            txt_color = "#FFFFFF" if rank.values[i, j] > 0.7 else INK
-            ax.text(j, i, f"{view.values[i, j]:.3f}", ha="center", va="center", fontsize=8,
-                    color=txt_color)
+    _annotate_cells(ax, np.vectorize("{:.3f}".format)(view.values), rank.values > 0.7)
     ax.set_xticks(range(view.shape[1]), [METRIC_TITLES[m] for m in view.columns], fontsize=8)
     ax.set_yticks(range(view.shape[0]), view.index, fontsize=8)
     ax.xaxis.tick_top()
@@ -153,6 +161,15 @@ def plot_overfitting(table: pd.DataFrame, metric: str = "auc", name: str = "23_s
 
 
 # --- Curvas e matrizes -------------------------------------------------------------------
+def _curve_style(model: str, best: str | None, palette: dict) -> dict:
+    """Estilo de uma curva: modelo final a verde e grosso; benchmark IBM a preto e tracejado."""
+    if model == best:
+        return dict(color=GREEN, linewidth=2.6, linestyle="-", zorder=3)
+    if "IBM" in model:
+        return dict(color=INK, linewidth=1.2, linestyle="--", zorder=2)
+    return dict(color=palette[model], linewidth=1.2, linestyle="-", zorder=2)
+
+
 def plot_roc_pr(y, probas: dict, best: str | None = None, name: str = "23b_roc_pr_cv",
                 title: str = "Curvas ROC e Precision-Recall — previsões out-of-fold",
                 show: bool = True):
@@ -166,10 +183,7 @@ def plot_roc_pr(y, probas: dict, best: str | None = None, name: str = "23b_roc_p
         if model == BASELINE:
             continue
         p = np.asarray(p, dtype=float)
-        is_best, is_ibm = model == best, "IBM" in model
-        color = GREEN if is_best else INK if is_ibm else palette[model]
-        kw = dict(color=color, linewidth=2.6 if is_best else 1.2,
-                  linestyle="--" if is_ibm else "-", zorder=3 if is_best else 2)
+        kw = _curve_style(model, best, palette)
         fpr, tpr, _ = roc_curve(y, p)
         prec, rec, _ = precision_recall_curve(y, p)
         axes[0].plot(fpr, tpr, label=f"{model} ({roc_auc_score(y, p):.3f})", **kw)
@@ -200,10 +214,8 @@ def plot_confusion_matrices(y, probas: dict, threshold: float = 0.5, ncols: int 
         cm = confusion_matrix(y, np.asarray(probas[model]) >= threshold)
         share = cm / cm.sum(axis=1, keepdims=True)
         ax.imshow(share, cmap=CMAP_BLUE, vmin=0, vmax=1)
-        for r in range(2):
-            for c in range(2):
-                ax.text(c, r, f"{cm[r, c]:,}\n{share[r, c]:.0%}", ha="center", va="center",
-                        fontsize=9, color="#FFFFFF" if share[r, c] > 0.6 else INK)
+        text = [[f"{cm[r, c]:,}\n{share[r, c]:.0%}" for c in range(2)] for r in range(2)]
+        _annotate_cells(ax, text, share > 0.6, fontsize=9)
         ax.set_xticks([0, 1], labels, fontsize=8)
         ax.set_yticks([0, 1], labels, fontsize=8)
         ax.set_xlabel("previsto", fontsize=8)
@@ -220,18 +232,14 @@ def plot_confusion_matrices(y, probas: dict, threshold: float = 0.5, ncols: int 
 def plot_threshold(y, p, model: str, marker: float | None = None,
                    name: str = "23d_limiar_modelo_final", show: bool = True):
     """Precision, recall, F1 e % de clientes sinalizados em função do limiar de decisão."""
-    from sklearn.metrics import f1_score, precision_score, recall_score
-    y, p = np.asarray(y), np.asarray(p)
-    grid = np.linspace(0.05, 0.95, 91)
-    prec = [precision_score(y, p >= t, zero_division=0) for t in grid]
-    rec = [recall_score(y, p >= t) for t in grid]
-    f1 = [f1_score(y, p >= t, zero_division=0) for t in grid]
-    flagged = [(p >= t).mean() for t in grid]
+    grid = THRESHOLD_GRID
+    t = threshold_table(y, p, grid)
     fig, ax = plt.subplots(figsize=(8, 4.2))
-    ax.plot(grid, prec, color=BLUE, linewidth=2, label="precision")
-    ax.plot(grid, rec, color=GREEN, linewidth=2, label="recall")
-    ax.plot(grid, f1, color=INK, linewidth=2, label="F1")
-    ax.plot(grid, flagged, color=GREY, linewidth=1.5, linestyle=":", label="% clientes sinalizados")
+    ax.plot(grid, t["precision"], color=BLUE, linewidth=2, label="precision")
+    ax.plot(grid, t["recall"], color=GREEN, linewidth=2, label="recall")
+    ax.plot(grid, t["f1"], color=INK, linewidth=2, label="F1")
+    ax.plot(grid, t["pct_sinalizados"], color=GREY, linewidth=1.5, linestyle=":",
+            label="% clientes sinalizados")
     if marker is not None:
         ax.axvline(marker, color=INK, linestyle="--", linewidth=1)
         ax.text(marker, 1.01, f" limiar {marker:.2f}", color=INK, fontsize=8)
@@ -247,11 +255,8 @@ def plot_diversity(corr: pd.DataFrame, name: str = "20_diversidade_modelos", sho
     fig, ax = plt.subplots(figsize=(0.75 * len(corr) + 3, 0.6 * len(corr) + 2))
     vmin = max(0.0, float(np.floor((corr.values.min() - 0.05) * 20) / 20))
     ax.imshow(corr.values, cmap=CMAP_BLUE, vmin=vmin, vmax=1)
-    for i in range(len(corr)):
-        for j in range(len(corr)):
-            v = corr.values[i, j]
-            ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=8,
-                    color="#FFFFFF" if (v - vmin) / (1 - vmin) > 0.6 else INK)
+    _annotate_cells(ax, np.vectorize("{:.2f}".format)(corr.values),
+                    (corr.values - vmin) / (1 - vmin) > 0.6)
     ax.set_xticks(range(len(corr)), corr.columns, rotation=35, ha="right", fontsize=8)
     ax.set_yticks(range(len(corr)), corr.index, fontsize=8)
     ax.grid(False)
@@ -337,4 +342,25 @@ def plot_priority_map(prio: pd.DataFrame, top_n: int, name: str = "26_mapa_prior
     ax.set_xlabel("P(churn)")
     ax.set_ylabel("CLTV")
     ax.legend(loc="upper left")
+    save_fig(fig, name, show)
+
+
+def plot_net_value(curves: dict, name: str = "30_valor_liquido", show: bool = True):
+    """Valor líquido observado vs nº de clientes contactados, uma linha por cenário.
+
+    curves: {nome do cenário: DataFrame de retention.net_value_curve}. O ponto marca o máximo.
+    """
+    palette = [GREY, BLUE, GREEN]
+    fig, ax = plt.subplots(figsize=(7, 4.2))
+    for (scenario, curve), color in zip(curves.items(), palette):
+        ax.plot(curve["clientes_contactados"], curve["valor_liquido"], color=color, linewidth=1.8,
+                label=scenario)
+        best = curve["valor_liquido"].idxmax()
+        ax.scatter(curve.loc[best, "clientes_contactados"], curve.loc[best, "valor_liquido"],
+                   color=color, s=30, zorder=3)
+    ax.axhline(0, color=INK, linewidth=0.8)
+    ax.set_title("Valor líquido da campanha por cenário — clientes estabelecidos (holdout)")
+    ax.set_xlabel("Clientes contactados (por ordem de P × CLTV)")
+    ax.set_ylabel("Valor salvo − custo (unidade do CLTV)")
+    ax.legend(loc="lower left")
     save_fig(fig, name, show)
