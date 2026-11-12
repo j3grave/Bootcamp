@@ -21,6 +21,7 @@ fonttools==4.67.0
 formulaic==1.2.2
 idna==3.20
 ImageHash==4.3.2
+iniconfig==2.3.1
 interface_meta==2.0.1
 ipykernel==7.4.0
 ipython==9.17.1
@@ -39,6 +40,7 @@ matplotlib==3.10.0
 matplotlib-inline==0.2.2
 minify_html==0.18.1
 multimethod==1.12
+mypy_extensions==1.2.0
 narwhals==2.27.1
 nbformat==5.11.1
 nbstripout==0.9.1
@@ -49,12 +51,14 @@ numpy==2.3.5
 openpyxl==3.1.5
 packaging==26.3
 pandas==2.3.3
+pandera==0.36.0
 parso==0.8.7
 patsy==1.0.3
 pexpect==4.9.0
 phik==0.12.5
 pillow==13.0.0
 platformdirs==4.13.4
+pluggy==1.7.0
 prompt_toolkit==3.0.53
 psutil==7.2.2
 ptyprocess==0.7.0
@@ -64,6 +68,7 @@ pydantic==2.14.1
 pydantic_core==2.50.1
 Pygments==2.21.0
 pyparsing==3.3.3
+pytest==9.2.0
 python-dateutil==2.9.0.post0
 pytz==2026.5
 PyWavelets==1.10.0
@@ -84,8 +89,9 @@ tornado==6.5.10
 tqdm==4.70.1
 traitlets==5.16.1
 typeguard==4.6.0
-typing-inspection==0.4.4
 typing_extensions==4.16.0
+typing-inspect==0.9.0
+typing-inspection==0.4.4
 tzdata==2026.5
 urllib3==2.8.0
 visions==0.8.1

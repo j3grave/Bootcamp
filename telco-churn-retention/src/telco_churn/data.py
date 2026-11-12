@@ -1,20 +1,35 @@
-"""Carregamento, validação e união dos ficheiros do dataset Telco."""
+"""Carregamento, validação e união dos ficheiros do dataset Telco.
+
+A validação (contratos de dados em schemas.py) corre por omissão ao carregar e ao unir: se uma
+regra com severidade 'erro' falhar, a pipeline pára com DataValidationError.
+"""
 import numpy as np
 import pandas as pd
 
+from . import schemas
 from .config import DATA_RAW, FILES
 
 CUSTOMER_TABLES = ("demographics", "location", "services", "status")
 REPORTING_COLS = ["Count", "Quarter"]   # campos de reporting, repetidos e não informativos
 
 
-def load_raw(data_dir=DATA_RAW) -> dict[str, pd.DataFrame]:
-    """Lê os 5 ficheiros. keep_default_na=False preserva o literal 'None'."""
-    return {name: pd.read_excel(data_dir / f, keep_default_na=False) for name, f in FILES.items()}
+def load_raw(data_dir=DATA_RAW, validate: bool = True) -> dict[str, pd.DataFrame]:
+    """Lê os 5 ficheiros. keep_default_na=False preserva o literal 'None'.
+
+    validate=True aplica os contratos dos ficheiros brutos (schemas.validate_raw) e começa um
+    relatório novo em outputs/tables/00_validacao_dados.csv.
+    """
+    raw = {name: pd.read_excel(data_dir / f, keep_default_na=False) for name, f in FILES.items()}
+    if validate:
+        schemas.enforce(schemas.validate_raw(raw), fresh=True)
+    return raw
 
 
 def validate_keys(raw: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Verifica unicidade das chaves, igualdade dos IDs e cobertura do join por Zip Code."""
+    """Tabela das chaves (linhas vs valores únicos), igualdade dos IDs e cobertura por Zip Code.
+
+    Resumo para o notebook 01; as mesmas regras são contratos em schemas.validate_raw.
+    """
     rows = []
     for name in CUSTOMER_TABLES:
         d = raw[name]
@@ -28,14 +43,16 @@ def validate_keys(raw: dict[str, pd.DataFrame]) -> pd.DataFrame:
     same_ids = all(s == id_sets[0] for s in id_sets)
     coverage = raw["location"]["Zip Code"].isin(p["Zip Code"]).mean()
 
-    assert out["chave_unica"].all(), "Existem chaves duplicadas"
-    assert same_ids, "Conjuntos de Customer ID diferentes entre ficheiros"
     out.attrs.update(same_ids=same_ids, zip_coverage=coverage)
     return out
 
 
-def merge_datasets(raw: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Une as tabelas numa base com 1 linha por cliente."""
+def merge_datasets(raw: dict[str, pd.DataFrame], validate: bool = True) -> pd.DataFrame:
+    """Une as tabelas numa base com 1 linha por cliente.
+
+    validate=True aplica as regras de negócio e as estatísticas da base unida
+    (schemas.validate_merged) e acrescenta-as ao relatório.
+    """
     clean = {n: d.drop(columns=[c for c in REPORTING_COLS if c in d.columns])
              for n, d in raw.items()}
     df = (
@@ -48,6 +65,8 @@ def merge_datasets(raw: dict[str, pd.DataFrame]) -> pd.DataFrame:
     )
     assert len(df) == len(raw["status"]), "O merge alterou o número de clientes"
     assert df["Customer ID"].is_unique
+    if validate:
+        schemas.enforce(schemas.validate_merged(df))
     return df
 
 
@@ -62,7 +81,10 @@ def data_quality(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def derivation_checks(df: pd.DataFrame) -> pd.Series:
-    """Confirma as derivações exatas documentadas no guia (esperado: 100%)."""
+    """% de concordância das derivações exatas do guia (resumo para o notebook 01).
+
+    São contratos obrigatórios a 100% em schemas.validate_merged.
+    """
     total_rev = (df["Total Charges"] - df["Total Refunds"]
                  + df["Total Extra Data Charges"] + df["Total Long Distance Charges"])
     return pd.Series({

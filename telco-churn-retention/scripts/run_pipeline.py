@@ -13,7 +13,7 @@ matplotlib.use("Agg")
 
 from sklearn.metrics import roc_auc_score
 
-from telco_churn import analysis, data, features, plots, preprocessing
+from telco_churn import analysis, data, features, plots, preprocessing, schemas
 from telco_churn.config import RANDOM_STATE, TAB_DIR, TARGET, ensure_dirs
 from telco_churn.style import apply_theme
 
@@ -65,6 +65,9 @@ def main() -> None:
     prep["trees"].fit(X_tr)
 
     cols = features.BUSINESS_COLS + f_num + f_cat + [TARGET]
+    forbidden = features.LEAKAGE_COLS + features.MODEL_DERIVED_COLS + features.SUSPECT_COLS
+    schemas.enforce(schemas.validate_split(df_model.loc[i_tr, cols], df_model.loc[i_te, cols],
+                                           f_num + f_cat, prep["trees"], forbidden))
     preprocessing.export_artifacts(
         df_model.loc[i_tr, cols], df_model.loc[i_te, cols], df_joined, df,
         {"preprocessors": prep, "features_num": f_num, "features_cat": f_cat,
@@ -78,4 +81,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except schemas.DataValidationError as e:   # contrato de dados violado: parar sem traceback
+        sys.exit(f"\n{e}")
