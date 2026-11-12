@@ -3,7 +3,7 @@
 Fase 1 do plano em `INSTRUCOES_CLAUDE_CODE.md`. Objetivo: código que um colega e o professor
 percebam numa leitura, sem perder funcionalidade e **sem alterar resultados**.
 
-Estado: **diagnóstico feito, à espera de aprovação**. Nada foi refatorado ainda.
+Estado: **concluído**. As 12 propostas foram aprovadas e aplicadas, uma por commit; métricas finais na secção 5.
 
 Base medida: `main` + `Nova-Versao-com-ML-Supervionado` + `fix/auditoria-correcoes`
 (branch `feature/validacao-e-app-hf`).
@@ -111,7 +111,7 @@ referência em `outputs/_referencia/`.
 
 | # | O quê | Porquê | Risco | Ganho |
 |---|---|---|---|---|
-| 10 | Dividir `run_modelling.main` em funções por etapa (`etapa_cv`, `etapa_variantes`, `etapa_holdout`, `etapa_priorizacao`, `etapa_retencao`, `exportar`) e passar as **decisões** para `modelling.py`: `choose_city_variant`, `fit_holdout`, `export_bundle` | 245 linhas numa função; decisões duplicadas e já divergentes entre script e notebook | A ordem de execução pode mudar resultados se alguma etapa partilhar estado; valida-se com a comparação das tabelas | C (11) → A; uma só versão das decisões; a Fase 3 (parcimónia) e a Fase 5 (deploy) ficam com um único sítio para mexer |
+| 10 | Dividir `run_modelling.main` em funções por etapa (`stage_cv`, `stage_variants`, `stage_holdout`, `stage_priority_model`, `stage_retention`, `stage_onboarding`) e passar as **decisões** para `modelling.py` (`include_city`, `fit_predict`, `save_bundle`) e `retention.py` (`CENARIOS`, `onboarding_rule`). *Nomes finais; na proposta original estavam em português — ficaram em inglês, como as restantes funções do projeto.* | 245 linhas numa função; decisões duplicadas e já divergentes entre script e notebook | A ordem de execução pode mudar resultados se alguma etapa partilhar estado; valida-se com a comparação das tabelas | C (11) → A; uma só versão das decisões; a Fase 3 (parcimónia) e a Fase 5 (deploy) ficam com um único sítio para mexer |
 | 11 | Notebook 02 passa a chamar as funções da proposta 10 em vez de repetir a lógica | Regra do projeto: a lógica vive em `src/`, o notebook mostra resultados | O notebook não é coberto por `run_all.py`; valida-se executando-o com `nbconvert` e comparando as tabelas | 437 → cerca de 300 linhas; fim da divergência |
 | 12 | Notebook 01: substituir a célula de 72 linhas que instala pacotes com `pip` por uma nota a apontar para `requirements.txt` | Instalar pacotes dentro de um notebook é frágil e não é análise | Quem abrir o notebook sem ambiente tem de correr `pip install -r requirements.txt` | −70 linhas; o notebook começa nos dados |
 
@@ -135,4 +135,46 @@ referência em `outputs/_referencia/`.
 
 ## 5. Métricas depois
 
-A preencher depois de aplicadas as propostas aprovadas.
+Todas as propostas foram aplicadas. Validação após cada uma: `run_all.py --sem-profiling` e
+comparação com `outputs/_referencia/` — as 25 tabelas, os ficheiros de `data/processed/` e as
+59 figuras (pixel a pixel) ficaram **iguais**. Para as propostas de gráficos usou-se também um
+banco de ensaio que desenha cada função com dados fixos antes e depois. Os notebooks 01 e 02
+foram executados de ponta a ponta e as tabelas que escrevem também ficaram iguais.
+
+Única diferença intencional: `final_model.joblib` passa a guardar também a chave `cv`
+(métricas de CV do modelo escolhido), como o notebook já fazia.
+
+| Módulo | Linhas antes | Linhas depois | MI antes | MI depois | CC máx. antes | CC máx. depois |
+|---|---:|---:|---:|---:|---:|---:|
+| `features.py` | 87 | 89 | 67,9 | 69,7 | 13 (C) | 10 (B) |
+| `model_plots.py` | 361 | 368 | 33,8 | 35,8 | 12 (C) | 10 (B) |
+| `modelling.py` | 382 | 417 | 51,3 | 51,6 | 5 (A) | 5 (A) |
+| `retention.py` | 169 | 189 | 65,8 | 65,1 | 3 (A) | 3 (A) |
+| `style.py` | 81 | 79 | 73,7 | 73,2 | 3 (A) | 3 (A) |
+| `scripts/run_modelling.py` | 294 | 320 | 45,3 | 41,4 | 11 (C) | 4 (A) |
+| restantes | — | sem alteração | — | — | — | — |
+
+| | Antes | Depois |
+|---|---:|---:|
+| Funções analisadas | 87 | 103 |
+| Nota A / B / C | 78 / 5 / 4 | 96 / 7 / **0** |
+| CC média | 3,0 | 2,5 |
+| Notebook 01 (linhas de código / maior célula) | 222 / 72 | 158 / 24 |
+| Notebook 02 (linhas de código / maior célula) | 437 / 44 | 402 / 39 |
+
+Leitura honesta dos números:
+
+- **Nenhuma função fica com nota C.** As quatro que tinham C descem para B (10, 10, 7) ou A (4).
+  `feature_roles` e `plot_metrics_panel` ficam em B 10: o radon conta cada condição dentro das
+  list comprehensions; partir mais estas funções não as tornaria mais legíveis.
+- **`run_modelling.py` tem mais linhas e MI ligeiramente mais baixo.** O MI penaliza o volume
+  de código, e dividir `main` em 11 funções com docstrings acrescenta linhas. Em troca, a função
+  mais complexa passa de C 11 para A 4 e cada etapa lê-se isoladamente.
+- **O notebook 02 encolheu menos do que o previsto (≈300).** A maior parte das células já só
+  chamava funções e mostrava tabelas, o que é o papel de um notebook. O ganho real está nas
+  decisões que deixaram de estar duplicadas: inclusão de City (`include_city`), treino final
+  (`fit_predict`), exportação (`save_bundle`), cenários de custo-benefício
+  (`retention.CENARIOS`) e regra de onboarding (`retention.onboarding_rule`) passam a existir
+  num só sítio, usado pelo script e pelo notebook.
+- **`modelling.py` cresceu 35 linhas** com as funções que antes estavam repetidas no script e
+  no notebook.
