@@ -52,11 +52,13 @@ def test_bate_a_dummy_e_a_regra_de_negocio(holdout):
 
 
 def test_nao_e_pior_do_que_o_churn_score_ibm(bundle, holdout):
-    """Critério acordado com o grupo: 'não pior do que a IBM'.
+    """Critério acordado com o grupo: 'não pior do que a IBM' (não inferioridade).
 
-    Em AUC aplica-se a mesma regra de empate da seleção (modelling.tied_with_best): uma
-    diferença menor do que o desvio-padrão em CV do melhor dos dois (aqui, a IBM) está dentro
-    do ruído entre folds. Em PR AUC tem de ser ≥ e em Brier (calibração) tem de ser melhor.
+    O pedido original era AUC ≥ AUC IBM, que falha (0,936 vs 0,941). Em AUC aplica-se a mesma
+    regra de empate da seleção (modelling.tied_with_best): uma diferença menor do que o
+    desvio-padrão em CV do melhor dos dois (aqui, a IBM: 0,0077) está dentro do ruído entre
+    folds. Exige-se ainda PR AUC ≥ IBM e Brier < IBM (calibração, precisa para P × CLTV).
+    Justificação completa: docs/modelling.md, "Critério de aceitação face ao Churn Score IBM".
     """
     y, p, ibm = holdout["y"], holdout["p"], holdout["ibm"]
     tolerance = bundle["benchmark_cv"]["auc_std"]

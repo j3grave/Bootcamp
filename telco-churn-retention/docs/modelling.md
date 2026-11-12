@@ -102,10 +102,49 @@ As métricas com limiar usam 0,5 por convenção. Com 28% de churn, esse limiar 
 - **Quantos contactar.** Depende de dois **pressupostos** que o dataset não tem: a taxa de sucesso do contacto e o custo por contacto (incluindo o incentivo). Estão definidos uma só vez em `retention.CENARIOS` (usados pelo notebook 02, secção 11.2, e por `scripts/run_modelling.py`), com três cenários e uma grelha de sensibilidade. O N de cada cenário vem da regra do valor esperado (contactar se P × CLTV × taxa_sucesso > custo) e é verificado com o ótimo observado no holdout.
 - **Ações por segmento** (`retention.suggest_action`) e **regra de onboarding** (`retention.onboarding_segment`) são hipóteses de negócio. A importância das variáveis mostra o que o modelo usa para ordenar clientes, não o efeito causal de mudar essas variáveis. Cada ação deve ser testada com um grupo de controlo sorteado (por exemplo 20% de cada segmento sem contacto), e a diferença de churn entre os dois grupos substitui a taxa de sucesso assumida.
 
+## Critério de aceitação face ao Churn Score IBM
+
+O teste `tests/test_model.py::test_nao_e_pior_do_que_o_churn_score_ibm` decide se o modelo pode ser publicado face ao benchmark IBM. As instruções iniciais pediam **AUC do modelo ≥ AUC da IBM** no holdout. Com o modelo atual, essa condição **falha**: 0,936 contra 0,941. O grupo decidiu substituí-la por um critério de **não inferioridade**. O teste passa só se as três condições se verificarem:
+
+| Condição | Valor do modelo | Valor da IBM | Limite | Resultado |
+|---|---|---|---|---|
+| ROC AUC ≥ AUC IBM − desvio-padrão da IBM em CV | 0,9362 | 0,9408 | 0,9408 − 0,0077 = 0,9331 | passa |
+| PR AUC ≥ PR AUC IBM | 0,8826 | 0,8762 | 0,8762 | passa |
+| Brier < Brier IBM | 0,0865 | 0,2142 | 0,2142 | passa |
+
+Os valores são do holdout. O desvio-padrão da IBM vem da CV de 5 folds no treino (`benchmark_cv` no `final_model.joblib`).
+
+**Porque se tolera uma diferença em AUC.**
+
+- **A diferença está dentro do ruído entre folds.** A diferença (0,0046) é menor do que a variação da AUC da IBM de fold para fold (0,0077). Com outra amostra de clientes, a ordem entre os dois podia inverter-se.
+- **É a mesma regra da seleção.** `tied_with_best` considera empatados dois modelos cuja diferença é menor do que o desvio-padrão do melhor dos dois, e o melhor aqui é a IBM. O teste não inventa uma tolerância nova; aplica à IBM a regra que já se aplica aos modelos.
+- **A tolerância usa o desvio-padrão da IBM, não o do modelo.** O do modelo (0,0040) é menor do que a diferença, por isso, medida contra ele, a diferença não seria ruído. A escolha segue a regra de seleção (o desvio-padrão do melhor) e fica declarada aqui para não parecer feita à medida.
+
+**Porque também se exigem PR AUC e Brier.** Um modelo empatado em AUC não chega para justificar trocar o score existente. Exige-se ainda:
+
+- **PR AUC pelo menos igual.** É a ordenação com foco nos churners, que é o que a equipa de retenção usa.
+- **Brier melhor.** É a calibração, de que a priorização por P(churn) × CLTV precisa: o Churn Score IBM / 100 não é uma probabilidade (Brier 0,214).
+
+O modelo ganha nas duas, e é aí que acrescenta valor face à IBM.
+
+**Quando o teste falha.**
+
+- **Por perda de AUC:** se um retreino deixar a AUC mais de um desvio-padrão da IBM abaixo dela.
+- **Por perda de PR AUC ou de calibração:** se perder em PR AUC, ou se deixar de ser mais bem calibrado do que a IBM.
+
+Em qualquer destes casos, o `deploy-hf.yml` não publica.
+
+**O que o critério não afirma.**
+
+- Não afirma que o modelo é melhor do que a IBM a ordenar clientes.
+- Não se sabe com que informação o Churn Score foi calculado. Nos clientes estabelecidos (tenure > 3), a IBM mantém AUC 0,94 e os nossos modelos ficam em ≈ 0,90.
+
+O relatório deve dizer "empatado com a IBM em AUC, melhor em PR AUC e em calibração", e não "bate a IBM".
+
 ## Limitações e decisões a declarar no relatório
 
 - **Brier e log loss do IBM.** `Churn Score / 100` não é uma probabilidade calibrada, por isso o Brier e o log loss do IBM só servem como referência. A comparação justa com o IBM é pelas métricas de ordenação (ROC AUC, PR AUC) e pela curva de captura.
-- **O modelo não bate o IBM em ROC AUC.** Avaliado nos mesmos folds, o Churn Score IBM tem AUC 0,942 ± 0,008 em CV, contra 0,938 ± 0,004 do Gradient Boosting; no holdout, 0,941 contra 0,936. A diferença (≈ 0,005) é menor do que o desvio-padrão da IBM entre folds (0,008), mas maior do que o do modelo (0,004). Pela regra de empate da seleção (`tied_with_best`, que usa o desvio-padrão do melhor dos dois), em ordenação estão **empatados**; o teste `test_nao_e_pior_do_que_o_churn_score_ibm` usa exatamente esta tolerância. O modelo é melhor em PR AUC (0,883 vs 0,876 no holdout) e muito melhor em calibração (Brier 0,087 vs 0,214), o que conta para a priorização por P × CLTV. A regra de negócio sem ML fica bem abaixo (AUC 0,84), o que mostra que o modelo acrescenta valor face a uma regra simples.
+- **O modelo não bate o IBM em ROC AUC** (0,936 vs 0,941 no holdout). Ver [Critério de aceitação face ao Churn Score IBM](#critério-de-aceitação-face-ao-churn-score-ibm): o teste exige "não pior do que a IBM", e não "melhor do que a IBM".
 - **O IBM nos clientes estabelecidos.** O Churn Score IBM mantém um AUC próximo de 0,94 nos clientes com tenure > 3, acima dos nossos modelos (≈ 0,90). Não sabemos com que informação foi calculado: pode usar variáveis que não temos ou informação posterior ao churn. Fica como benchmark e não como feature.
 - **Validação cruzada não aninhada.** O tuning e a comparação dos modelos usam os mesmos folds do treino, por isso o AUC em CV do vencedor é ligeiramente otimista. Optámos por não usar CV aninhada (seria 5× mais lenta) porque a escolha final é confirmada uma única vez no holdout, que não entrou no tuning.
 - **Utilização do holdout.** O holdout não é usado para escolher modelos nem hiperparâmetros. É usado, depois das escolhas feitas, para: as métricas finais dos dois modelos e do IBM; a variante com Satisfaction Score (só para documentar o leakage); a permutation importance; a curva de captura, a comparação P vs P × CLTV e o ótimo observado da análise custo-benefício. Os pressupostos de negócio não são afinados no holdout.
