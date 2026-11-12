@@ -133,6 +133,14 @@ A precision desce porque a lista passa a ter o dobro dos clientes. Em troca, a e
 
 Os cortes do modelo core sobre toda a base (`capacity_cuts` em `final_model.joblib`, tabelas `11e_*` e `13b_*`) ficam como análise do modelo core e já não são usados na app.
 
+Os níveis de risco (30% / 60%) também estão calibrados no modelo de priorização, que é o que a app usa nos clientes estabelecidos. Nos 1183 clientes estabelecidos do holdout (`17c_niveis_risco_estabelecidos_holdout.csv`):
+
+| Nível | % dos estabelecidos | P média | Churn real |
+|---|---|---|---|
+| baixo (< 30%) | 75% | 7% | 8% |
+| médio (30–60%) | 13% | 44% | 42% |
+| alto (≥ 60%) | 12% | 77% | 76% |
+
 ## Decisões de retenção: o que é dado e o que é pressuposto
 
 - **P × CLTV vs só P.** A tabela `15b_P_vs_PxCLTV.csv` mostra quantos clientes as duas listas têm em comum e que % dos churners e do CLTV perdido cada uma cobre. A comparação com o IBM faz-se sempre entre ordenações do mesmo tipo (P × CLTV com Churn Score × CLTV; só P com só Churn Score).
@@ -244,6 +252,7 @@ O relatório deve dizer "empatado com a IBM em AUC, melhor em PR AUC e em calibr
 | `15b_P_vs_PxCLTV.csv` | Lista por P vs lista por P × CLTV: clientes em comum, churners e CLTV cobertos |
 | `16_tuning_estabelecidos.csv`, `16b_cv_modelos_estabelecidos.csv`, `16c_selecao_modelo_estabelecidos.csv` | Tuning, CV e seleção do modelo de priorização |
 | `16d_limiares_capacidade_estabelecidos_cv.csv`, `17b_limiares_capacidade_estabelecidos_holdout.csv` | Cortes de capacidade (top 10% / 20%) só com clientes estabelecidos: OOF e holdout |
+| `17c_niveis_risco_estabelecidos_holdout.csv` | Níveis de risco do modelo de priorização nos clientes estabelecidos do holdout |
 | `17_comparacao_core_priorizacao.csv` | Modelo core vs modelo de priorização vs IBM, por conjunto do holdout |
 | `18_importancia_priorizacao.csv` | Queda de AUC por variável no modelo de priorização |
 | `19_regra_onboarding.csv` | Segmentos de onboarding dos clientes novos e taxa de saída |

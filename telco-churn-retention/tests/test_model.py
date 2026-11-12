@@ -138,6 +138,15 @@ def test_modelo_de_priorizacao_bate_a_regra_nos_estabelecidos(priority, holdout)
     assert auc > roc_auc_score(est_te["churn"], rule.predict_proba(est_te)[:, 1])
 
 
+def test_niveis_de_risco_calibrados_no_modelo_de_priorizacao(priority, holdout):
+    """É o modelo que a app usa nos clientes estabelecidos: o nível também tem de ser lido
+    como uma percentagem real."""
+    est = holdout["test"][holdout["test"]["Tenure in Months"] > 3]
+    t = modelling.risk_level_table(est["churn"], scoring.predict(priority, est))
+    assert t["churn_real"].is_monotonic_increasing
+    assert (t["churn_real"] - t["p_media"]).abs().max() < 0.10
+
+
 def test_capacidade_calculada_so_com_clientes_estabelecidos(bundle, priority, holdout):
     """Os cortes do lote vêm do modelo de priorização (tenure > 3) e sinalizam cerca de 10% e
     20% dos clientes estabelecidos; os do modelo core seriam ocupados pelos clientes novos."""

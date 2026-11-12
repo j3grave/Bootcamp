@@ -199,6 +199,9 @@ def stage_priority_model(d, n_iter: int, best, p_test):
         TAB_DIR / "16d_limiares_capacidade_estabelecidos_cv.csv")
     modelling.decision_table(y_test_est, p_test_est, thresholds_est).to_csv(
         TAB_DIR / "17b_limiares_capacidade_estabelecidos_holdout.csv")
+    # Os níveis de risco (30% / 60%) também se leem como % real com este modelo (é o da app)
+    modelling.risk_level_table(y_test_est, p_test_est).to_csv(
+        TAB_DIR / "17c_niveis_risco_estabelecidos_holdout.csv")
     y_test = d.test[d.TARGET]
     est_mask = features.is_established(d.test).to_numpy()
     comparison = modelling.comparison_table([
