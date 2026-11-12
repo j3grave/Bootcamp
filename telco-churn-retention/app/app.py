@@ -20,6 +20,23 @@ import sys
 import tempfile
 from pathlib import Path
 
+# O Space corre em hardware ZeroGPU. A app não usa GPU (scikit-learn em CPU), mas o ZeroGPU
+# recusa arrancar sem pelo menos uma função @spaces.GPU ("No @spaces.GPU function detected
+# during startup"). O pacote `spaces` só existe nos Spaces; localmente este bloco não faz nada.
+try:
+    import spaces   # importar antes de qualquer pacote que use CUDA (aqui não há nenhum)
+except ImportError:
+    spaces = None
+if spaces is not None:
+    # Não deixar o Gradio enviar as funções da app para a GPU: tudo corre em CPU e não gasta
+    # a quota de ZeroGPU dos visitantes.
+    spaces.disable_gradio_auto_wrap()
+
+    @spaces.GPU(duration=1)
+    def _zerogpu_startup_check():
+        """Só existe para o ZeroGPU arrancar; nunca é chamada pela app."""
+        return None
+
 import gradio as gr
 import joblib
 import pandas as pd
