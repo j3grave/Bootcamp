@@ -48,6 +48,14 @@ def _label_bars(ax, vals, xmax: float) -> None:
         else:
             ax.text(v + xmax * 0.015, i, f"{v:.3f}", va="center", color=INK, fontsize=7)
 
+def _annotate_cells(ax, text, dark, fontsize: int = 8) -> None:
+    """Escreve o texto de cada célula de uma grelha (imshow); a branco nas células escuras."""
+    for i, row in enumerate(text):
+        for j, label in enumerate(row):
+            ax.text(j, i, label, ha="center", va="center", fontsize=fontsize,
+                    color="#FFFFFF" if dark[i][j] else INK)
+
+
 # --- Comparação geral --------------------------------------------------------------------
 def plot_cv_comparison(cv: pd.DataFrame, benchmark_auc: float | None = None,
                        name: str = "21_cv_modelos",
@@ -121,11 +129,7 @@ def plot_metrics_heatmap(view: pd.DataFrame, name: str = "22b_heatmap_metricas_c
     rank[LOWER_IS_BETTER] = view[LOWER_IS_BETTER].rank(pct=True, ascending=False)
     fig, ax = plt.subplots(figsize=(12, 0.45 * len(view) + 1.6))
     ax.imshow(rank.values, cmap=CMAP_BLUE, aspect="auto", vmin=0, vmax=1.05)
-    for i in range(view.shape[0]):
-        for j in range(view.shape[1]):
-            txt_color = "#FFFFFF" if rank.values[i, j] > 0.7 else INK
-            ax.text(j, i, f"{view.values[i, j]:.3f}", ha="center", va="center", fontsize=8,
-                    color=txt_color)
+    _annotate_cells(ax, np.vectorize("{:.3f}".format)(view.values), rank.values > 0.7)
     ax.set_xticks(range(view.shape[1]), [METRIC_TITLES[m] for m in view.columns], fontsize=8)
     ax.set_yticks(range(view.shape[0]), view.index, fontsize=8)
     ax.xaxis.tick_top()
@@ -211,10 +215,8 @@ def plot_confusion_matrices(y, probas: dict, threshold: float = 0.5, ncols: int 
         cm = confusion_matrix(y, np.asarray(probas[model]) >= threshold)
         share = cm / cm.sum(axis=1, keepdims=True)
         ax.imshow(share, cmap=CMAP_BLUE, vmin=0, vmax=1)
-        for r in range(2):
-            for c in range(2):
-                ax.text(c, r, f"{cm[r, c]:,}\n{share[r, c]:.0%}", ha="center", va="center",
-                        fontsize=9, color="#FFFFFF" if share[r, c] > 0.6 else INK)
+        text = [[f"{cm[r, c]:,}\n{share[r, c]:.0%}" for c in range(2)] for r in range(2)]
+        _annotate_cells(ax, text, share > 0.6, fontsize=9)
         ax.set_xticks([0, 1], labels, fontsize=8)
         ax.set_yticks([0, 1], labels, fontsize=8)
         ax.set_xlabel("previsto", fontsize=8)
@@ -258,11 +260,8 @@ def plot_diversity(corr: pd.DataFrame, name: str = "20_diversidade_modelos", sho
     fig, ax = plt.subplots(figsize=(0.75 * len(corr) + 3, 0.6 * len(corr) + 2))
     vmin = max(0.0, float(np.floor((corr.values.min() - 0.05) * 20) / 20))
     ax.imshow(corr.values, cmap=CMAP_BLUE, vmin=vmin, vmax=1)
-    for i in range(len(corr)):
-        for j in range(len(corr)):
-            v = corr.values[i, j]
-            ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=8,
-                    color="#FFFFFF" if (v - vmin) / (1 - vmin) > 0.6 else INK)
+    _annotate_cells(ax, np.vectorize("{:.2f}".format)(corr.values),
+                    (corr.values - vmin) / (1 - vmin) > 0.6)
     ax.set_xticks(range(len(corr)), corr.columns, rotation=35, ha="right", fontsize=8)
     ax.set_yticks(range(len(corr)), corr.index, fontsize=8)
     ax.grid(False)
