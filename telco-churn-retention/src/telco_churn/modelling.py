@@ -1,18 +1,6 @@
-"""Modelação: modelos base, rede neuronal, ensembles, avaliação e priorização P(churn) × CLTV.
+"""Modelação: modelos, ensembles, avaliação em CV, holdout e priorização P(churn) × CLTV.
 
-Protocolo (descrito em docs/modelling.md):
-    1. Todos os modelos são Pipelines (pré-processador + classificador), por isso a preparação
-       dos dados é ajustada dentro de cada fold e não há fuga de informação.
-    2. Os hiperparâmetros são escolhidos com RandomizedSearchCV (StratifiedKFold, 5 folds),
-       só no treino.
-    3. Todos os modelos, base e ensembles, são comparados na mesma validação cruzada, com
-       nove métricas, ao lado de três referências: a taxa de churn (Dummy), uma regra de negócio
-       sem ML e o Churn Score IBM (avaliado nos mesmos folds).
-    4. Regra de parcimónia: entre o modelo de maior AUC e os empatados com ele (diferença menor
-       do que um desvio-padrão entre folds), escolhe-se o mais simples (COMPLEXITY_ORDER).
-    5. O holdout (20%) é usado uma única vez, no fim, ao lado das mesmas referências.
-
-A descrição de cada modelo está em docs/models.md e no dicionário MODEL_INFO abaixo.
+O protocolo e a descrição de cada modelo estão no README.md ("Protocolo" e "Modelos").
 """
 import joblib
 import numpy as np
@@ -87,11 +75,8 @@ COMPLEXITY_ORDER = ["Logistic Regression", "Decision Tree", "k-Nearest Neighbors
                     "Soft Voting", "Stacking"]
 ENSEMBLES = ["Soft Voting", "Stacking"]
 
-# Membros dos ensembles: modelos fortes e de famílias diferentes (linear, rede neuronal,
-# bagging, boosting). A árvore isolada e o kNN ficam de fora: são mais fracos e já estão
-# representados, com vantagem, pelas florestas. A escolha é fixa à partida, e não feita a
-# olhar para os resultados, para que a validação cruzada continue a ser um juiz justo.
-# O sklearn pede um nome curto para cada membro (sem espaços), por isso guardamos os dois.
+# Membros dos ensembles, fixados antes de ver os resultados para a CV continuar justa.
+# O sklearn pede um nome curto sem espaços para cada membro.
 ENSEMBLE_MEMBERS = {
     "Logistic Regression": "lr",
     "Neural Network (MLP)": "mlp",
@@ -100,7 +85,7 @@ ENSEMBLE_MEMBERS = {
     "Gradient Boosting": "gb",
 }
 
-# Descrição curta de cada modelo (tabelas do notebook). Detalhe completo em docs/models.md.
+# Descrição curta de cada modelo (tabelas do notebook). Detalhe no README.md ("Modelos").
 MODEL_INFO = pd.DataFrame([
     (BASELINE, "referência", "—",
      "Dá a todos os clientes a taxa de churn do treino. Qualquer modelo útil tem de a bater."),
@@ -171,10 +156,10 @@ def metrics_glossary() -> pd.DataFrame:
 
 # --- Dados ---------------------------------------------------------------------------
 def load_processed() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
-    """Lê train/test/joined e a configuração exportada pelo notebook 01.
+    """Lê train/test/joined e a configuração da fase 1.
 
-    keep_default_na=False preserva o literal 'None' (Offer, Internet Type); só "" é missing.
-    City não está em train/test: é recuperada da base unificada para o teste com TargetEncoder.
+    keep_default_na=False preserva o literal 'None'. City não está em train/test: vem da base
+    unida para a variante com TargetEncoder.
     """
     read = dict(keep_default_na=False, na_values=[""])
     train = pd.read_csv(DATA_PROCESSED / "train.csv", **read)
@@ -190,12 +175,9 @@ def load_processed() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
 
 # --- Regra de negócio (linha de base sem ML) ----------------------------------------------
 class BusinessRuleScore(ClassifierMixin, BaseEstimator):
-    """Regra simples, sem ML: 1 ponto por cada fator de risco, de 0 a 3 pontos.
+    """Regra sem ML: 1 ponto por fator de risco (Month-to-Month, tenure ≤ 12, fibra), de 0 a 3.
 
-    Fatores fixados à partida a partir da EDA (associação mais forte com o churn no treino):
-    contrato Month-to-Month, tenure até 12 meses e internet por fibra ótica.
-    fit() só regista a taxa de churn de cada nº de pontos no treino, para a regra dar uma
-    probabilidade (precisa-se dela para o Brier e o log loss; o AUC só depende dos pontos).
+    fit() só regista a taxa de churn por nº de pontos, para dar uma probabilidade (Brier, log loss).
     """
 
     def points(self, X: pd.DataFrame) -> np.ndarray:
@@ -220,10 +202,9 @@ class BusinessRuleScore(ClassifierMixin, BaseEstimator):
 
 # --- Construção dos modelos ----------------------------------------------------------
 def make_preprocessors(num: list[str], cat: list[str], te: list[str] = ()) -> dict:
-    """Pré-processadores do notebook 01 + TargetEncoder opcional (ex.: City).
+    """Pré-processadores da fase 1 e, opcionalmente, um TargetEncoder (ex.: City).
 
-    O TargetEncoder fica dentro do Pipeline: é ajustado só nos dados de treino de cada fold.
-    Recebe o mesmo StratifiedKFold (CV) do resto do projeto, para dar sempre o mesmo resultado.
+    O TargetEncoder fica dentro do Pipeline e usa o mesmo StratifiedKFold, para ser reprodutível.
     """
     preps = build_preprocessors(num, cat)
     if te:
@@ -254,10 +235,9 @@ def tune_base_models(X: pd.DataFrame, y: pd.Series, num: list[str], cat: list[st
 
 def build_models(num: list[str], cat: list[str], params: dict, te: list[str] = (),
                  baseline: bool = True) -> dict:
-    """Linhas de base (Dummy e regra de negócio) + modelos afinados + dois ensembles.
+    """Linhas de base, modelos afinados e os dois ensembles (membros em ENSEMBLE_MEMBERS).
 
-    Os ensembles usam os modelos de ENSEMBLE_MEMBERS. O stacking aprende os pesos com
-    previsões out-of-fold (cv=5), para não aprender com previsões feitas sobre o seu treino.
+    O stacking usa previsões out-of-fold (cv=5) para não aprender com o seu próprio treino.
     """
     preps = make_preprocessors(num, cat, te)
     base = {name: _pipeline(preps[kind], clone(clf).set_params(**params.get(name, {})))
@@ -299,16 +279,11 @@ def cv_evaluate(models: dict, X: pd.DataFrame, y: pd.Series, threshold: float = 
                 benchmarks: dict | None = None) -> tuple[pd.DataFrame, dict]:
     """Avalia todos os modelos no mesmo 5-fold estratificado.
 
-    benchmarks: {nome: score em [0, 1]} de referências que não se treinam (ex.: o Churn Score
-    IBM / 100). São avaliadas nos mesmos folds, para comparar com os modelos de forma justa.
+    benchmarks: {nome: score em [0, 1]} que não se treinam (ex.: Churn Score IBM / 100),
+    avaliados nos mesmos folds.
 
-    Devolve:
-        table: uma linha por modelo, com a média e o desvio-padrão de cada métrica nos folds
-               de validação (ex.: auc, auc_std) e a média nos folds de treino (ex.: auc_train).
-               A diferença auc_train - auc mede o sobreajuste.
-        oof:   para cada modelo, as probabilidades out-of-fold (cada cliente do treino
-               recebe a previsão do modelo que não o viu). Servem para as curvas ROC/PR,
-               matrizes de confusão e análise de limiar, sem tocar no holdout.
+    Devolve (table, oof): table tem a média e o desvio-padrão de cada métrica em validação e a
+    média no treino (auc_train - auc = sobreajuste); oof tem as probabilidades out-of-fold.
     """
     y = y.reset_index(drop=True)
     X = X.reset_index(drop=True)
@@ -348,20 +323,14 @@ def select_best(table: pd.DataFrame, metric: str = "auc") -> str:
 
 
 def tied_with_best(table: pd.DataFrame, best: str, metric: str = "auc") -> list[str]:
-    """Modelos cuja diferença para o melhor é menor do que o desvio-padrão do melhor em CV.
-
-    Na prática estão empatados: a diferença está dentro do ruído entre folds.
-    """
+    """Modelos a menos de um desvio-padrão (o do melhor, em CV) do melhor: empatados com ele."""
     t = table.drop(index=REFERENCES, errors="ignore")
     gap = t.loc[best, metric] - t[metric]
     return list(t.index[(gap < t.loc[best, f"{metric}_std"]) & (t.index != best)])
 
 
 def select_parsimonious(table: pd.DataFrame, metric: str = "auc") -> tuple[str, pd.DataFrame, str]:
-    """Regra de parcimónia: o mais simples entre o melhor e os empatados com ele.
-
-    Devolve (modelo escolhido, tabela da decisão, justificação em texto).
-    """
+    """Regra de parcimónia. Devolve (modelo escolhido, tabela da decisão, justificação)."""
     best = select_best(table, metric)
     candidates = [best] + tied_with_best(table, best, metric)
     chosen = min(candidates, key=COMPLEXITY_ORDER.index)
@@ -420,10 +389,7 @@ def decision_table(y, p, thresholds: dict) -> pd.DataFrame:
     return t.reset_index().set_index("criterio")
 
 
-# Duas leituras diferentes de P(churn), mostradas lado a lado na app e no lote:
-#   nível de risco      -> absoluto: "quão provável é sair?" (o modelo está calibrado, por isso
-#                          P ≈ taxa de churn observada; ver 13c_niveis_risco_holdout.csv)
-#   prioridade contacto -> relativo: "cabe na capacidade da equipa?" (top 10% / 20% da base)
+# Nível de risco (absoluto) e prioridade de contacto (relativa à capacidade): README.md, "Métricas".
 RISK_LEVELS = {"médio": 0.30, "alto": 0.60}   # baixo < 30% ≤ médio < 60% ≤ alto
 RISK_ORDER = ["baixo", "médio", "alto"]
 PRIORITY_ORDER = ["top 10%", "top 20%", "fora da capacidade"]
@@ -436,10 +402,9 @@ def risk_level(p, cuts: dict = RISK_LEVELS) -> np.ndarray:
 
 
 def contact_priority(p, capacity_cuts: dict) -> np.ndarray:
-    """Prioridade de contacto pela capacidade da equipa: 'top 10%', 'top 20%' da base ou fora.
+    """Prioridade de contacto: 'top 10%', 'top 20%' ou fora.
 
-    capacity_cuts: {"top 10%": limiar, "top 20%": limiar}, os quantis de P(churn) fixados nas
-    previsões out-of-fold do treino (capacity_thresholds), guardados no final_model.joblib.
+    capacity_cuts: {"top 10%": limiar, "top 20%": limiar}, fixados nas previsões OOF do treino.
     """
     p = np.asarray(p, dtype=float)
     return np.select([p >= capacity_cuts["top 10%"], p >= capacity_cuts["top 20%"]],
@@ -458,11 +423,7 @@ def risk_level_table(y, p, cuts: dict = RISK_LEVELS) -> pd.DataFrame:
 
 # --- Decisões e treino final ----------------------------------------------------------
 def include_city(cv_table: pd.DataFrame, best: str, city_cv: pd.DataFrame) -> tuple[float, bool]:
-    """Ganho de AUC em CV ao juntar City e se compensa incluí-la.
-
-    Só compensa se o ganho for maior do que o desvio-padrão do melhor modelo entre folds;
-    abaixo disso, a diferença está dentro do ruído.
-    """
+    """Ganho de AUC em CV com City; só compensa se passar o desvio-padrão do melhor modelo."""
     gain = city_cv["auc"].iloc[0] - cv_table.loc[best, "auc"]
     return gain, bool(gain > cv_table.loc[best, "auc_std"])
 
@@ -494,12 +455,10 @@ def holdout_report(probas: dict, y: pd.Series, benchmark: pd.Series) -> pd.DataF
 
 def paired_bootstrap_auc_diff(y, p_model, p_reference, n_boot: int = 2000,
                               random_state: int = RANDOM_STATE, level: float = 0.95) -> dict:
-    """Intervalo de confiança (bootstrap emparelhado) para AUC(modelo) − AUC(referência).
+    """IC por bootstrap emparelhado para AUC(modelo) − AUC(referência).
 
-    Em cada reamostra sorteiam-se clientes com reposição e calculam-se as duas AUC nos MESMOS
-    clientes, por isso a variação da amostra afeta os dois scores da mesma forma. O intervalo
-    é o percentil (2,5% e 97,5% para 95%). Se incluir zero, a diferença não é
-    estatisticamente distinguível de zero neste holdout. É um reporte: não decide nada.
+    As duas AUC calculam-se nos mesmos clientes de cada reamostra; o intervalo é o dos percentis.
+    Se incluir zero, a diferença não se distingue do ruído. Só reporte.
     """
     y, a, b = np.asarray(y), np.asarray(p_model, dtype=float), np.asarray(p_reference, dtype=float)
     rng = np.random.default_rng(random_state)
@@ -520,10 +479,9 @@ def paired_bootstrap_auc_diff(y, p_model, p_reference, n_boot: int = 2000,
 
 
 def comparison_table(rows: list) -> pd.DataFrame:
-    """Métricas de vários modelos, cada um no conjunto de clientes indicado.
+    """Métricas de vários modelos, cada um no seu conjunto de clientes.
 
-    rows: lista de (modelo, conjunto, y, P(churn)). Serve para comparar modelos treinados em
-    populações diferentes: só faz sentido comparar linhas com o mesmo conjunto.
+    rows: lista de (modelo, conjunto, y, P(churn)). Só se comparam linhas do mesmo conjunto.
     """
     table = []
     for model_name, subset_name, y, p in rows:

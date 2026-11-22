@@ -1,15 +1,9 @@
-"""Contratos de dados: o que os ficheiros têm de cumprir para a pipeline poder continuar.
+"""Contratos de dados (pandera) dos ficheiros brutos, da base unida e do train/test.
 
-Cada regra é um esquema pandera pequeno com nome, camada e severidade:
-    erro  -> a pipeline pára (DataValidationError) com a lista das regras que falharam;
-    aviso -> regista-se no relatório e a pipeline continua.
-
-Camadas: os 5 ficheiros brutos, a base unida e o resultado do pré-processamento (train/test).
-O relatório fica em outputs/tables/00_validacao_dados.csv (regra, camada, severidade,
-resultado, linhas_a_falhar). As regras estão documentadas no README ("Data Contracts").
-
-Os intervalos numéricos são plausíveis, não os mínimos/máximos observados: deixam margem para
-dados novos, mas apanham erros de registo (ex.: idade negativa, Satisfaction Score = 9).
+Severidade 'erro' pára a pipeline com DataValidationError; 'aviso' só fica no relatório
+outputs/tables/00_validacao_dados.csv. Regras descritas no README.md ("Contratos de dados").
+Os intervalos numéricos são plausíveis, não os observados: aceitam dados novos e apanham
+erros de registo (ex.: Satisfaction Score = 9).
 """
 from dataclasses import dataclass
 from typing import Callable
@@ -210,7 +204,7 @@ def merged_rules() -> list[Rule]:
             lambda d: ~no_phone(d) | _is(d, "Multiple Lines", "No"),
         "Phone Service = No ⇒ Avg Monthly Long Distance Charges = 0":
             lambda d: ~no_phone(d) | (d["Avg Monthly Long Distance Charges"] == 0),
-        # Derivações exatas (antes em data.derivation_checks, agora obrigatórias a 100%)
+        # Derivações exatas, obrigatórias a 100%
         "Under 30 = Yes ⇔ Age < 30": lambda d: (d["Age"] < 30) == _is(d, "Under 30", "Yes"),
         "Senior Citizen = Yes ⇔ Age ≥ 65":
             lambda d: (d["Age"] >= 65) == _is(d, "Senior Citizen", "Yes"),

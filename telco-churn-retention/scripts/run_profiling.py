@@ -1,7 +1,6 @@
-"""Gera os 3 relatórios ydata-profiling em outputs/profiling/ (sem notebook).
+"""Gera os 3 relatórios ydata-profiling em outputs/profiling/.
 
-Uso, a partir da raiz do repositório:
-    python scripts/run_profiling.py
+Uso, a partir da raiz do projeto: python scripts/run_profiling.py
 """
 import sys
 import warnings

@@ -1,12 +1,7 @@
-"""Gráficos da modelação (notebook 02), com a paleta e o tema de style.py.
+"""Gráficos da modelação (notebook 02). Guardam a figura em outputs/figures/ via save_fig.
 
-Estão separados de plots.py (gráficos da EDA) para que alterações a uma fase não apaguem,
-por engano, os gráficos da outra. Todos guardam a figura em outputs/figures/ via save_fig.
-
-Convenção de cores:
-    azul  = modelos individuais        verde = ensembles e modelo final
-    cinzento = linhas de base (Dummy e regra de negócio)
-    preto/tinta = benchmark IBM e linhas de referência
+Cores: azul = modelos individuais, verde = ensembles e modelo final,
+cinzento = linhas de base, preto = benchmark IBM e linhas de referência.
 """
 import math
 
@@ -86,11 +81,9 @@ def plot_metrics_panel(view: pd.DataFrame, std: pd.DataFrame | None = None,
                        show: bool = True):
     """Um painel por métrica e uma barra por modelo.
 
-    view:  valores a mostrar (modelos x métricas), por ex. médias em CV ou o holdout.
-    std:   desvio-padrão entre folds (barra de erro), opcional.
-    train: valores no treino, opcional; aparecem como um losango sobre a barra. Quando o
-           losango fica muito à direita da barra (ou à esquerda, no log loss e no Brier),
-           o modelo está a decorar o treino.
+    view:  valores (modelos x métricas), ex.: médias em CV ou holdout.
+    std:   desvio-padrão entre folds, opcional.
+    train: valores no treino, opcional, como losango; longe da barra = sobreajuste.
     """
     order = list(view.sort_values("auc", ascending=False).index)
     fig, axes = plt.subplots(3, 3, figsize=(15, 0.36 * len(order) * 3 + 2.5), sharey=True)
@@ -265,11 +258,9 @@ def plot_diversity(corr: pd.DataFrame, name: str = "20_diversidade_modelos", sho
 
 
 def plot_mlp_training(mlp, name: str = "23e_rede_neuronal_treino", show: bool = True):
-    """Curva de aprendizagem da rede neuronal: perda no treino e accuracy na validação interna.
+    """Curva de aprendizagem da MLP: loss no treino e accuracy na validação interna.
 
-    mlp: o MLPClassifier já treinado (ex.: pipeline.named_steps['clf']). Com early_stopping,
-    o scikit-learn guarda a loss em cada época (loss_curve_) e a accuracy na validação interna
-    (validation_scores_). O treino pára quando esta deixa de melhorar.
+    mlp: o MLPClassifier já treinado (ex.: pipeline.named_steps['clf']).
     """
     fig, ax1 = plt.subplots(figsize=(8, 3.8))
     epochs = np.arange(1, len(mlp.loss_curve_) + 1)

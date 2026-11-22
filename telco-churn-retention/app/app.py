@@ -1,35 +1,25 @@
-"""App de retenção de clientes (Gradio): risco de churn e decisão de desconto.
+"""App Gradio de retenção: risco de churn e decisão de desconto.
 
-Dois separadores:
-  • Cliente individual — formulário com as variáveis originais do modelo; devolve P(churn),
-    nível de risco, prioridade de contacto, principais fatores e a recomendação de desconto.
-  • Lote — upload de um CSV; devolve duas listas para descarregar: clientes estabelecidos
-    ordenados por P(churn) × CLTV e clientes novos por segmento de onboarding.
+Cliente individual: P(churn), nível de risco, prioridade de contacto, fatores e desconto.
+Lote: CSV com duas listas, clientes estabelecidos (priority_model, por P(churn) × CLTV) e
+clientes novos (segmento de onboarding; o final_model dá só um valor indicativo).
+Os modelos vêm do Model repo em MODEL_REPO ou, localmente, de outputs/artifacts/.
 
-Dois modelos (ver docs/modelling.md, "Porque há dois modelos"):
-  • priority_model.joblib — clientes estabelecidos (tenure > 3): P(churn), níveis de risco e
-    prioridade de contacto (cortes de capacidade calculados só com clientes estabelecidos);
-  • final_model.joblib    — modelo core; nos clientes novos (tenure ≤ 3) só dá um valor
-    indicativo, porque extrapola. Estes clientes seguem a regra de onboarding.
-No Hugging Face são descarregados do Model repo indicado na variável MODEL_REPO; localmente
-usam-se os de outputs/artifacts/.
-Correr localmente, a partir da raiz do projeto:  python app/app.py
+Correr a partir da raiz do projeto: python app/app.py
 """
 import os
 import sys
 import tempfile
 from pathlib import Path
 
-# O Space corre em hardware ZeroGPU. A app não usa GPU (scikit-learn em CPU), mas o ZeroGPU
-# recusa arrancar sem pelo menos uma função @spaces.GPU ("No @spaces.GPU function detected
-# during startup"). O pacote `spaces` só existe nos Spaces; localmente este bloco não faz nada.
+# O ZeroGPU só arranca com pelo menos uma função @spaces.GPU, mesmo sem usar a GPU.
+# O pacote `spaces` só existe nos Spaces; localmente este bloco não faz nada.
 try:
-    import spaces   # importar antes de qualquer pacote que use CUDA (aqui não há nenhum)
+    import spaces   # tem de vir antes de pacotes que usem CUDA
 except ImportError:
     spaces = None
 if spaces is not None:
-    # Não deixar o Gradio enviar as funções da app para a GPU: tudo corre em CPU e não gasta
-    # a quota de ZeroGPU dos visitantes.
+    # Tudo corre em CPU, sem gastar a quota de ZeroGPU dos visitantes.
     spaces.disable_gradio_auto_wrap()
 
     @spaces.GPU(duration=1)
@@ -55,15 +45,14 @@ def load_bundle(filename: str) -> dict:
     repo = os.environ.get("MODEL_REPO")
     if repo:
         from huggingface_hub import hf_hub_download
-        # Model repo público: não precisa de token. Se for privado, o deploy cria o secret
-        # HF_TOKEN no Space e ele é usado aqui.
+        # Público dispensa token; se for privado, o deploy cria o secret HF_TOKEN no Space.
         path = hf_hub_download(repo_id=repo, filename=filename,
                                token=os.environ.get("HF_TOKEN") or None)
         return joblib.load(path)
     for path in (HERE / filename, LOCAL_ARTIFACTS / filename):   # ao lado da app, ou do projeto
         if path.exists():
             return joblib.load(path)
-    raise FileNotFoundError(f"Sem {filename}: definir MODEL_REPO ou correr scripts/run_all.py")
+    raise FileNotFoundError(f"Sem {filename}: definir MODEL_REPO ou correr scripts/run_pipeline.py")
 
 
 CORE = load_bundle("final_model.joblib")        # clientes novos: só valor indicativo
@@ -89,7 +78,7 @@ GROUPS = {
 }
 GROUPS = {g: [c for c in cols if c in FORM] for g, cols in GROUPS.items()}
 GROUPS["Outros"] = [c for c in COLUMNS if not any(c in g for g in GROUPS.values())]
-ORDER = [c for cols in GROUPS.values() for c in cols]   # ordem dos campos no formulário
+ORDER = [c for cols in GROUPS.values() for c in cols]
 
 
 def _component(col: str):
