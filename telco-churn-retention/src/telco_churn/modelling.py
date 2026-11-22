@@ -1,6 +1,6 @@
 """Modelação: modelos base, rede neuronal, ensembles, avaliação e priorização P(churn) × CLTV.
 
-Protocolo (descrito em docs/modelling.md):
+Protocolo (descrito no README.md):
     1. Todos os modelos são Pipelines (pré-processador + classificador), por isso a preparação
        dos dados é ajustada dentro de cada fold e não há fuga de informação.
     2. Os hiperparâmetros são escolhidos com RandomizedSearchCV (StratifiedKFold, 5 folds),
@@ -12,7 +12,7 @@ Protocolo (descrito em docs/modelling.md):
        do que um desvio-padrão entre folds), escolhe-se o mais simples (COMPLEXITY_ORDER).
     5. O holdout (20%) é usado uma única vez, no fim, ao lado das mesmas referências.
 
-A descrição de cada modelo está em docs/models.md e no dicionário MODEL_INFO abaixo.
+A descrição de cada modelo está no README.md ("Modelos") e no dicionário MODEL_INFO abaixo.
 """
 import joblib
 import numpy as np
@@ -100,7 +100,7 @@ ENSEMBLE_MEMBERS = {
     "Gradient Boosting": "gb",
 }
 
-# Descrição curta de cada modelo (tabelas do notebook). Detalhe completo em docs/models.md.
+# Descrição curta de cada modelo (tabelas do notebook). Detalhe no README.md ("Modelos").
 MODEL_INFO = pd.DataFrame([
     (BASELINE, "referência", "—",
      "Dá a todos os clientes a taxa de churn do treino. Qualquer modelo útil tem de a bater."),

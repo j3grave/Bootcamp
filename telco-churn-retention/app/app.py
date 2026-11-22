@@ -6,7 +6,7 @@ Dois separadores:
   • Lote — upload de um CSV; devolve duas listas para descarregar: clientes estabelecidos
     ordenados por P(churn) × CLTV e clientes novos por segmento de onboarding.
 
-Dois modelos (ver docs/modelling.md, "Porque há dois modelos"):
+Dois modelos (ver README.md, "Porque há dois modelos"):
   • priority_model.joblib — clientes estabelecidos (tenure > 3): P(churn), níveis de risco e
     prioridade de contacto (cortes de capacidade calculados só com clientes estabelecidos);
   • final_model.joblib    — modelo core; nos clientes novos (tenure ≤ 3) só dá um valor

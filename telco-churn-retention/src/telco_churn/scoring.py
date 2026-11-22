@@ -58,7 +58,7 @@ def predict(bundle: dict, customers: pd.DataFrame) -> np.ndarray:
 
 
 def is_new_customer(tenure) -> np.ndarray:
-    """Clientes com poucos meses de casa: o modelo extrapola (ver docs/modelling.md)."""
+    """Clientes com poucos meses de casa: o modelo extrapola (ver README.md, "Porque há dois modelos")."""
     return np.asarray(tenure) <= NEW_CUSTOMER_MAX_TENURE
 
 

@@ -73,7 +73,7 @@ def test_nao_e_pior_do_que_o_churn_score_ibm(bundle, holdout):
     regra de empate da seleção (modelling.tied_with_best): uma diferença menor do que o
     desvio-padrão em CV do melhor dos dois (aqui, a IBM: 0,0077) está dentro do ruído entre
     folds. Exige-se ainda PR AUC ≥ IBM e Brier < IBM (calibração, precisa para P × CLTV).
-    Justificação completa: docs/modelling.md, "Critério de aceitação face ao Churn Score IBM".
+    Justificação completa: README.md, "Critério de aceitação face ao Churn Score IBM".
     """
     y, p, ibm = holdout["y"], holdout["p"], holdout["ibm"]
     tolerance = bundle["benchmark_cv"]["auc_std"]
@@ -134,7 +134,7 @@ def test_lote_pequeno_ou_so_com_novos(bundle, priority, holdout):
 # de risco calibrados. NÃO exige não inferioridade face à IBM: nos clientes estabelecidos a IBM
 # ordena melhor (AUC 0,939 vs 0,899, IC 95% da diferença sem o zero). Isso fica reportado
 # (17d_bootstrap_auc_priorizacao_vs_ibm.csv, MODEL_CARD, app) e não bloqueia a publicação.
-# Ver docs/modelling.md, "Gate do modelo de priorização".
+# Ver README.md, "Gate do modelo de priorização".
 
 def test_priorizacao_sobreajuste_controlado(priority):
     gap = priority["cv"]["auc_train"] - priority["cv"]["auc"]
