@@ -28,7 +28,7 @@ def merged(raw):
 
 @pytest.fixture(scope="session")
 def split(merged):
-    """Treino/teste exatamente como em scripts/run_pipeline.py."""
+    """Treino/teste exatamente como em scripts/run_preprocessing.py."""
     df_model, _ = features.split_population(merged)
     num, cat, _ = features.feature_roles(df_model)
     df_model = features.add_features(df_model)

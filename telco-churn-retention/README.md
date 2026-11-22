@@ -22,7 +22,7 @@ O sistema ajuda o *Head of Customer Retention* a decidir que clientes contactar 
 flowchart LR
     A[5 ficheiros Excel<br/>data/raw] --> B{Contratos de dados<br/>schemas.py · pandera}
     B -- erro --> X[Pipeline pára<br/>00_validacao_dados.csv]
-    B -- ok --> C[Pré-processamento<br/>run_pipeline.py]
+    B -- ok --> C[Pré-processamento<br/>run_preprocessing.py]
     C --> D[Treino e seleção<br/>run_modelling.py]
     D --> E[Testes<br/>pytest]
     E -- falham --> Y[Não publica]
@@ -35,7 +35,7 @@ flowchart LR
 | Passo | Onde | Quando corre |
 |---|---|---|
 | Validação dos dados | `src/telco_churn/schemas.py`, chamado em `data.load_raw` e `data.merge_datasets` | Sempre que os dados são lidos |
-| Pré-processamento e modelação | `scripts/run_all.py --sem-profiling` | Localmente e no `deploy-hf.yml` |
+| Pré-processamento e modelação | `scripts/run_pipeline.py` (no deploy, com `--sem-profiling`) | Localmente e no `deploy-hf.yml` |
 | Testes | `tests/` (pytest) | Em cada push ou PR (`ci.yml`) e antes de publicar |
 | Publicação | `scripts/publish_hf.py` | No `deploy-hf.yml`, manual ou em push para `main`, só se a pipeline e os testes passarem |
 
@@ -85,10 +85,10 @@ telco-churn-retention/
 │   ├── scoring.py            # cliente, lote, fatores e decisão de desconto
 │   └── model_plots.py        # gráficos da modelação
 ├── scripts/
-│   ├── run_pipeline.py       # fase 1 sem notebook
+│   ├── run_pipeline.py       # ponto de entrada: pergunta que fases correr
+│   ├── run_preprocessing.py  # fase 1 sem notebook
 │   ├── run_profiling.py      # fase 1b
 │   ├── run_modelling.py      # fase 2 sem notebook
-│   ├── run_all.py            # as três por ordem
 │   └── publish_hf.py         # publica modelo e app no Hugging Face
 ├── tests/                    # pytest: dados, pré-processamento, modelo, app
 ├── app/                      # app Gradio do Space
@@ -123,15 +123,21 @@ nbstripout --install      # uma vez por clone: limpa os outputs dos notebooks em
 
 ### 2. Pipeline
 
-As fases correm por ordem, porque cada uma usa os ficheiros da anterior.
+```bash
+python scripts/run_pipeline.py
+```
+
+Pergunta no terminal o que correr: fase 1, profiling, fase 2 (normal ou rápida), testes e publicação no Hugging Face. Publicar corre sempre os testes antes; no modo rápido só prepara os ficheiros. Com `--sem-profiling` corre as fases 1 e 2 sem perguntas, como no deploy.
+
+Cada fase também corre sozinha, por ordem, porque cada uma usa os ficheiros da anterior:
 
 | Fase | Notebook (kernel `.venv`, *Run All*) | Linha de comandos |
 |---|---|---|
-| 1. Pré-processamento e EDA | `01_preprocessing_eda.ipynb` | `python scripts/run_pipeline.py` |
+| 1. Pré-processamento e EDA | `01_preprocessing_eda.ipynb` | `python scripts/run_preprocessing.py` |
 | 1b. Profiling (opcional) | `01b_profiling_ydata.ipynb` | `python scripts/run_profiling.py` |
 | 2. Modelação | `02_modelling_eda.ipynb` | `python scripts/run_modelling.py` |
 
-Tudo de uma vez: `python scripts/run_all.py` (ou `--sem-profiling`). A fase 2 demora cerca de 5 minutos, porque o tuning corre duas vezes (modelo core e de priorização). Para testar alterações depressa: `python scripts/run_modelling.py --rapido`.
+A fase 2 demora cerca de 5 minutos, porque o tuning corre duas vezes (modelo core e de priorização). Para testar alterações depressa: `python scripts/run_modelling.py --rapido`.
 
 ### 3. Testes
 
@@ -146,6 +152,7 @@ pytest tests/test_data.py -v    # só os contratos de dados
 | `test_preprocessing.py` | Treino e teste disjuntos e estratificados; sem leakage nas features; sem NaN depois do pré-processador |
 | `test_model.py` | Os dois artefactos, sem retreinar: separação de estabelecidos e novos no lote, cortes de capacidade, [critério face à IBM](#critério-de-aceitação-face-ao-churn-score-ibm) e [gate do modelo de priorização](#gate-do-modelo-de-priorização) |
 | `test_bootstrap.py` | O método do intervalo de confiança (scores iguais dão 0, resultado reprodutível) |
+| `test_run_pipeline.py` | Ordem das fases e testes obrigatórios antes de publicar |
 | `test_app.py` | Decisão do desconto nos casos limite (P = 0, P = 1, custo = 0, eficácia = 0, empate, valores inválidos) |
 
 ### 4. App local
@@ -408,7 +415,7 @@ As regras estão em `src/telco_churn/schemas.py` e o resultado de cada uma em `o
 | base unida | Estatísticas | ≈ 7.043 clientes (± 5%); churn ≈ 28,4% (± 3 p.p.); ≤ 5% de missing; Joined ⇒ tenure ≤ 3 | aviso |
 | pré-processamento | Saída | Treino e teste sem IDs comuns; churn semelhante (± 1 p.p.); sem colunas de leakage; zero NaN | erro |
 
-Os intervalos são plausíveis, não os mínimos e máximos observados (idades observadas 19–80, contrato aceita 18–100). Para ver uma regra a falhar: mudar um `Satisfaction Score` para 9 no Excel de status e correr `python scripts/run_pipeline.py`.
+Os intervalos são plausíveis, não os mínimos e máximos observados (idades observadas 19–80, contrato aceita 18–100). Para ver uma regra a falhar: mudar um `Satisfaction Score` para 9 no Excel de status e correr `python scripts/run_preprocessing.py`.
 
 ---
 

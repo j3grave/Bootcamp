@@ -42,7 +42,7 @@ jobs:
 
       # Os contratos de dados correm aqui: um ficheiro fora do contrato pára o job
       - name: Pipeline (validação de dados, pré-processamento e modelação)
-        run: python scripts/run_all.py --sem-profiling
+        run: python scripts/run_pipeline.py --sem-profiling
 
       - name: Testes (incluindo os do modelo exportado)
         run: pytest tests -v

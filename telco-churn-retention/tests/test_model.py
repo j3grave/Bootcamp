@@ -1,6 +1,6 @@
 """Modelos exportados: qualidade mínima e uso pela app, sem retreinar.
 
-Precisa da pipeline corrida antes (python scripts/run_all.py --sem-profiling).
+Precisa da pipeline corrida antes (python scripts/run_pipeline.py --sem-profiling).
 """
 import joblib
 import numpy as np
@@ -17,7 +17,7 @@ MAX_TRAIN_CV_GAP = 0.05   # AUC treino − AUC validação em CV: acima disto, s
 
 pytestmark = pytest.mark.skipif(not MODEL_PATH.exists() or not PRIORITY_PATH.exists()
                                 or not (DATA_PROCESSED / "test.csv").exists(),
-                                reason="falta o modelo exportado: correr scripts/run_all.py")
+                                reason="falta o modelo exportado: correr scripts/run_pipeline.py")
 
 
 @pytest.fixture(scope="module")

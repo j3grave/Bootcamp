@@ -1,6 +1,6 @@
 """Fase 2 sem notebook: faz o mesmo que notebooks/02_modelling_eda.ipynb.
 
-Precisa dos ficheiros da fase 1 (run_pipeline.py ou notebook 01). Os gráficos são guardados.
+Precisa dos ficheiros da fase 1 (run_preprocessing.py ou notebook 01). Os gráficos são guardados.
 
 Uso, a partir da raiz do projeto:
     python scripts/run_modelling.py              # completo (N_ITER = 20)
@@ -331,7 +331,7 @@ def main() -> None:
     ensure_dirs()
     apply_theme()
     if not (DATA_PROCESSED / "train.csv").exists():
-        sys.exit("Falta data/processed/train.csv: correr primeiro scripts/run_pipeline.py")
+        sys.exit("Falta data/processed/train.csv: correr primeiro scripts/run_preprocessing.py")
 
     d = load_data()
     step(f"Treino {d.train[d.FEATURES].shape} | Teste {d.test[d.FEATURES].shape}"

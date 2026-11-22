@@ -1,86 +1,80 @@
-"""Fase 1 sem notebook: pré-processamento e EDA (gráficos guardados).
+"""Ponto de entrada do projeto: pergunta que fases correr e corre-as por ordem.
 
-Uso, a partir da raiz do projeto: python scripts/run_pipeline.py
+Uso, a partir da raiz do projeto:
+    python scripts/run_pipeline.py                  # pergunta no terminal
+    python scripts/run_pipeline.py --sem-profiling  # sem perguntas: fases 1 e 2 (usado no deploy)
 """
+import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+ROOT = Path(__file__).resolve().parents[1]
+PY = sys.executable
+MODEL_REPO = os.environ.get("HF_MODEL_REPO", "tvf007/EDSBG1TP2-model")
+SPACE = os.environ.get("HF_SPACE", "tvf007/EDSBG1TP2")
 
-import matplotlib
-matplotlib.use("Agg")
 
-from sklearn.metrics import roc_auc_score
+def ask(question: str, default: bool) -> bool:
+    answer = input(f"{question} {'[S/n]' if default else '[s/N]'} ").strip().lower()
+    return default if not answer else answer.startswith("s")
 
-from telco_churn import analysis, data, features, plots, preprocessing, schemas
-from telco_churn.config import RANDOM_STATE, TAB_DIR, TARGET, ensure_dirs
-from telco_churn.style import apply_theme
+
+def plan(c: dict) -> list[tuple[str, list[str]]]:
+    """Comandos a correr, por ordem. Publicar obriga a correr os testes antes."""
+    steps = []
+    if c["preprocessing"]:
+        steps.append(("Fase 1 · pré-processamento e EDA", [PY, "scripts/run_preprocessing.py"]))
+    if c["profiling"]:
+        steps.append(("Fase 1b · profiling", [PY, "scripts/run_profiling.py"]))
+    if c["modelling"]:
+        steps.append(("Fase 2 · modelação",
+                      [PY, "scripts/run_modelling.py"] + (["--rapido"] if c["rapido"] else [])))
+    if c["tests"] or c["publish"]:
+        steps.append(("Testes", [PY, "-m", "pytest", "tests", "-q"]))
+    if c["publish"]:
+        steps.append(("Publicação no Hugging Face",
+                      [PY, "scripts/publish_hf.py", "--model-repo", c["model_repo"],
+                       "--space", c["space"]] + (["--dry-run"] if c["dry_run"] else [])))
+    return steps
+
+
+def interactive() -> dict:
+    c = {"preprocessing": ask("Fase 1 · pré-processamento e EDA?", True),
+         "profiling": ask("Fase 1b · relatórios ydata-profiling (lento)?", False),
+         "modelling": ask("Fase 2 · modelação?", True)}
+    c["rapido"] = c["modelling"] and ask("  Modo rápido (N_ITER = 3, sem variantes)?", False)
+    c["tests"] = ask("Testes (pytest)?", True)
+    c["publish"] = ask("Publicação no Hugging Face (corre os testes antes)?", False)
+    c.update(dry_run=True, model_repo=MODEL_REPO, space=SPACE)
+    if c["publish"]:
+        c["model_repo"] = input(f"  Model repo [{MODEL_REPO}] ").strip() or MODEL_REPO
+        c["space"] = input(f"  Space [{SPACE}] ").strip() or SPACE
+        if c["rapido"]:
+            print("  Modo rápido: só se preparam os ficheiros, sem publicar.")
+        else:
+            c["dry_run"] = not ask("  Publicar mesmo (e não só preparar os ficheiros)?", False)
+        if not c["dry_run"] and not os.environ.get("HF_TOKEN"):
+            sys.exit("Falta a variável de ambiente HF_TOKEN para publicar.")
+    return c
 
 
 def main() -> None:
-    ensure_dirs()
-    apply_theme()
-
-    raw = data.load_raw()
-    data.validate_keys(raw)
-    df = data.merge_datasets(raw)
-    data.data_quality(df).to_csv(TAB_DIR / "01_qualidade_dados.csv")
-    print(data.derivation_checks(df).to_string(), "\n")
-
-    df_model, df_joined = features.split_population(df)
-    rate = df_model[TARGET].mean()
-    tenure_status = features.tenure_status_table(df)
-    tenure_status.to_csv(TAB_DIR / "02b_tenure_estado.csv")
-    print(tenure_status.to_string(), "\n")
-    num, cat, roles = features.feature_roles(df_model)
-    roles.to_csv(TAB_DIR / "02_papeis_variaveis.csv", index=False)
-    plots.plot_target(df_model[TARGET], show=False)
-
-    analysis.numeric_profile(df_model, num).to_csv(TAB_DIR / "03_perfil_numericas.csv")
-    for c in num:
-        plots.plot_numeric(df_model, c, TARGET, show=False)
-    plots.plot_correlation(df_model[num + [TARGET]].corr(method="spearman"), show=False)
-
-    analysis.categorical_profile(df_model, cat).to_csv(TAB_DIR / "04_perfil_categoricas.csv")
-    analysis.value_dictionary(df_model, cat, TARGET).to_csv(
-        TAB_DIR / "05_dicionario_categorias.csv", index=False)
-    plots.plot_categorical_overview(df_model, cat, show=False)
-    cramers = analysis.cramers_ranking(df_model, cat, TARGET)
-    cramers.to_csv(TAB_DIR / "06_cramers_v.csv")
-    for c in cat:
-        plots.plot_categorical_detail(df_model, c, TARGET, rate, cramers[c], show=False)
-
-    mi = analysis.mutual_information(df_model, num, cat, TARGET)
-    mi.to_csv(TAB_DIR / "07_mutual_information.csv")
-    plots.plot_leakage_checks(df_model, TARGET, show=False)
-
-    df_model = features.add_features(df_model)
-    df_joined = features.add_features(df_joined)
-    f_num, f_cat = num + features.NEW_NUM, cat + features.NEW_CAT
-
-    X_tr, X_te, _, y_te, i_tr, i_te = preprocessing.stratified_split(
-        df_model, f_num + f_cat, TARGET)
-    prep = preprocessing.build_preprocessors(f_num, f_cat)
-    prep["trees"].fit(X_tr)
-
-    cols = features.BUSINESS_COLS + f_num + f_cat + [TARGET]
-    forbidden = features.LEAKAGE_COLS + features.MODEL_DERIVED_COLS + features.SUSPECT_COLS
-    schemas.enforce(schemas.validate_split(df_model.loc[i_tr, cols], df_model.loc[i_te, cols],
-                                           f_num + f_cat, prep["trees"], forbidden))
-    preprocessing.export_artifacts(
-        df_model.loc[i_tr, cols], df_model.loc[i_te, cols], df_joined, df,
-        {"preprocessors": prep, "features_num": f_num, "features_cat": f_cat,
-         "target": TARGET, "random_state": RANDOM_STATE})
-
-    auc = roc_auc_score(y_te, df_model.loc[i_te, "Churn Score"])
-    print(f"Clientes modelação: {len(df_model):,} | churn {rate:.1%}")
-    print(f"Treino {X_tr.shape} | Teste {X_te.shape}")
-    print(f"AUC benchmark (Churn Score IBM, holdout): {auc:.3f}")
-    print("Concluído. Ver outputs/ e data/processed/.")
+    if len(sys.argv) > 1 or not sys.stdin.isatty():
+        c = dict(preprocessing=True, profiling="--sem-profiling" not in sys.argv,
+                 modelling=True, rapido=False, tests=False, publish=False)
+    else:
+        c = interactive()
+    t0 = time.time()
+    for label, cmd in plan(c):
+        print(f"\n=== {label} ===")
+        t = time.time()
+        if subprocess.run(cmd, cwd=ROOT).returncode != 0:
+            sys.exit(f"✘ {label} falhou: os passos seguintes não correm.")
+        print(f"✔ {label} em {time.time() - t:.0f}s")
+    print(f"\nConcluído em {time.time() - t0:.0f}s. Ver outputs/ e data/processed/.")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except schemas.DataValidationError as e:   # contrato de dados violado: parar sem traceback
-        sys.exit(f"\n{e}")
+    main()

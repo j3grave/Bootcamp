@@ -52,7 +52,7 @@ def load_bundle(filename: str) -> dict:
     for path in (HERE / filename, LOCAL_ARTIFACTS / filename):   # ao lado da app, ou do projeto
         if path.exists():
             return joblib.load(path)
-    raise FileNotFoundError(f"Sem {filename}: definir MODEL_REPO ou correr scripts/run_all.py")
+    raise FileNotFoundError(f"Sem {filename}: definir MODEL_REPO ou correr scripts/run_pipeline.py")
 
 
 CORE = load_bundle("final_model.joblib")        # clientes novos: só valor indicativo
