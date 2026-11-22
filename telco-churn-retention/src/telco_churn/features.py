@@ -29,10 +29,8 @@ ADD_ONS = ["Online Security", "Online Backup", "Device Protection Plan", "Premiu
 NEW_NUM = ["n_add_on_services", "avg_hist_charge", "charge_delta"]
 NEW_CAT = ["has_refund"]
 
-# Os Joined têm todos 1 a 3 meses de casa. Um cliente novo que ficou é rotulado Joined (e sai
-# da população core); um cliente novo que saiu é rotulado Churned (e fica). Por isso, dentro de
-# Churned + Stayed, tenure <= 3 significa quase sempre churn: é um efeito da forma como os
-# estados foram definidos, não um padrão de comportamento.
+# Em Churned + Stayed, tenure <= 3 é quase sempre churn por causa do registo dos estados,
+# não do comportamento (README.md, "Porque há dois modelos").
 NEW_CUSTOMER_MAX_TENURE = 3
 
 

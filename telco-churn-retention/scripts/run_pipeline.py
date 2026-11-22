@@ -1,7 +1,6 @@
-"""Corre o pipeline completo sem notebook (gráficos guardados, não mostrados).
+"""Fase 1 sem notebook: pré-processamento e EDA (gráficos guardados).
 
-Uso, a partir da raiz do repositório:
-    python scripts/run_pipeline.py
+Uso, a partir da raiz do projeto: python scripts/run_pipeline.py
 """
 import sys
 from pathlib import Path

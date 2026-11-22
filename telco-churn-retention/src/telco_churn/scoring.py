@@ -1,7 +1,6 @@
-"""Usar o modelo exportado: um cliente (formulário da app), um lote (CSV) e a decisão do desconto.
+"""Usar os modelos exportados: um cliente, um lote e a decisão do desconto.
 
-Este módulo não depende do Gradio: a app (app/app.py) só trata da interface e chama estas
-funções, que são testadas em tests/test_model.py e tests/test_app.py.
+Não depende do Gradio; a app só trata da interface.
 """
 import numpy as np
 import pandas as pd
@@ -30,11 +29,9 @@ def default_inputs(train: pd.DataFrame, columns: list[str]) -> dict:
 
 
 def form_spec(train: pd.DataFrame, columns: list[str]) -> dict:
-    """Especificação do formulário da app, tirada do treino e guardada no artefacto.
+    """Especificação do formulário da app (valores por omissão, limites, opções), tirada do treino.
 
-    Numéricas: valor por omissão (mediana), mínimo, máximo e se são inteiras.
-    Categóricas: valor por omissão (moda) e opções possíveis.
-    Assim a app não precisa dos dados de treino.
+    Fica no artefacto para a app não precisar dos dados de treino.
     """
     defaults = default_inputs(train, columns)
     spec = {}
@@ -107,15 +104,11 @@ def local_factors(bundle: dict, customer: pd.DataFrame, top: int = 5) -> pd.Data
 
 def score_batch(priority_bundle: dict, customers: pd.DataFrame,
                 core_bundle: dict | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Pontua um lote e devolve duas listas: (clientes estabelecidos, clientes novos).
+    """Pontua um lote e devolve (clientes estabelecidos, clientes novos).
 
-    Estabelecidos (tenure > 3): modelo de priorização, ordenados por perda esperada =
-    P(churn) × CLTV, com o nível de risco e a prioridade de contacto. Os cortes de capacidade
-    (top 10% / 20%) foram calculados só com clientes estabelecidos.
-
-    Novos (tenure ≤ 3): o modelo de priorização nunca os viu e o modelo core extrapola (dá-lhes
-    P ≈ 1 pelo artefacto do registo de estados). Recebem o segmento de onboarding e, se
-    core_bundle for dado, a P(churn) do modelo core só como valor indicativo.
+    Estabelecidos (tenure > 3): modelo de priorização, por P(churn) × CLTV, com nível de risco
+    e prioridade de contacto. Novos (tenure ≤ 3): segmento de onboarding e, se core_bundle for
+    dado, a P(churn) do core só como valor indicativo.
     """
     for col in (ID_COL, CLTV_COL):
         if col not in customers.columns:

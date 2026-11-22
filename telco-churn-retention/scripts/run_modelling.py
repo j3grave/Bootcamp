@@ -1,15 +1,11 @@
-"""Corre a fase de modelação completa sem notebook (gráficos guardados, não mostrados).
+"""Fase 2 sem notebook: faz o mesmo que notebooks/02_modelling_eda.ipynb.
 
-Faz o mesmo que notebooks/02_modelling_eda.ipynb, pela mesma ordem e com as mesmas funções
-de src/telco_churn. Precisa dos ficheiros gerados pelo pré-processamento
-(scripts/run_pipeline.py ou notebook 01).
+Precisa dos ficheiros da fase 1 (run_pipeline.py ou notebook 01). Os gráficos são guardados.
 
-Uso, a partir da raiz do repositório (telco-churn-retention):
-    python scripts/run_modelling.py              # versão completa (N_ITER = 20)
+Uso, a partir da raiz do projeto:
+    python scripts/run_modelling.py              # completo (N_ITER = 20)
     python scripts/run_modelling.py --n-iter 5   # tuning mais curto
-    python scripts/run_modelling.py --rapido     # teste rápido: N_ITER = 3, sem variantes
-
-Também é chamado por scripts/run_all.py.
+    python scripts/run_modelling.py --rapido     # N_ITER = 3, sem variantes
 """
 import argparse
 import sys
@@ -146,7 +142,7 @@ def stage_holdout(d, models, best, model_sat, city_model, use_city, thresholds):
         TAB_DIR / "13d_bootstrap_auc_vs_ibm.csv")
     step(f"AUC modelo − IBM: {boot['diferenca']:+.4f}, IC 95% [{boot['ic_inferior']:+.4f}, "
          f"{boot['ic_superior']:+.4f}] (inclui zero: {boot['ic_inclui_zero']})")
-    # Níveis de risco absolutos (30% / 60%): a taxa de churn real confirma a leitura de P
+    # Níveis de risco (30% / 60%) contra a taxa de churn real
     modelling.risk_level_table(y_test, p_test).to_csv(TAB_DIR / "13c_niveis_risco_holdout.csv")
     model_plots.plot_roc_calibration(y_test, {
         best: p_test, "Churn Score IBM": d.test["Churn Score"] / 100,
@@ -190,8 +186,7 @@ def stage_priority_model(d, n_iter: int, best, p_test):
     priority_model = models_est[best_est].fit(X_train_est, y_train_est)
     p_test_est = priority_model.predict_proba(X_test_est)[:, 1]
 
-    # Capacidade da equipa medida só nos clientes estabelecidos: os clientes novos (P ≈ 1 no
-    # modelo core) já não ocupam o top 10% / 20%. Limiares fixados no OOF, aplicados ao holdout.
+    # Cortes de capacidade só com clientes estabelecidos: fixados no OOF, aplicados ao holdout
     cuts_est = modelling.capacity_thresholds(oof_est[best_est])
     thresholds_est = {"0,5 (por omissão)": 0.5,
                       "capacidade top 10%": cuts_est[0.10], "capacidade top 20%": cuts_est[0.20]}
@@ -206,7 +201,7 @@ def stage_priority_model(d, n_iter: int, best, p_test):
         TAB_DIR / "17d_bootstrap_auc_priorizacao_vs_ibm.csv")
     step(f"Priorização − IBM (tenure > 3): {boot_est['diferenca']:+.4f}, IC 95% "
          f"[{boot_est['ic_inferior']:+.4f}, {boot_est['ic_superior']:+.4f}]")
-    # Os níveis de risco (30% / 60%) também se leem como % real com este modelo (é o da app)
+    # Níveis de risco do modelo usado pela app
     modelling.risk_level_table(y_test_est, p_test_est).to_csv(
         TAB_DIR / "17c_niveis_risco_estabelecidos_holdout.csv")
     y_test = d.test[d.TARGET]

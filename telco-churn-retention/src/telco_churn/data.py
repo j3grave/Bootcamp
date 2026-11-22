@@ -1,8 +1,4 @@
-"""Carregamento, validação e união dos ficheiros do dataset Telco.
-
-A validação (contratos de dados em schemas.py) corre por omissão ao carregar e ao unir: se uma
-regra com severidade 'erro' falhar, a pipeline pára com DataValidationError.
-"""
+"""Carregamento, validação (schemas.py) e união dos ficheiros do dataset Telco."""
 import numpy as np
 import pandas as pd
 
@@ -16,8 +12,7 @@ REPORTING_COLS = ["Count", "Quarter"]   # campos de reporting, repetidos e não 
 def load_raw(data_dir=DATA_RAW, validate: bool = True) -> dict[str, pd.DataFrame]:
     """Lê os 5 ficheiros. keep_default_na=False preserva o literal 'None'.
 
-    validate=True aplica os contratos dos ficheiros brutos (schemas.validate_raw) e começa um
-    relatório novo em outputs/tables/00_validacao_dados.csv.
+    Com validate=True aplica os contratos dos ficheiros brutos e começa um relatório novo.
     """
     raw = {name: pd.read_excel(data_dir / f, keep_default_na=False) for name, f in FILES.items()}
     if validate:
@@ -26,10 +21,7 @@ def load_raw(data_dir=DATA_RAW, validate: bool = True) -> dict[str, pd.DataFrame
 
 
 def validate_keys(raw: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Tabela das chaves (linhas vs valores únicos), igualdade dos IDs e cobertura por Zip Code.
-
-    Resumo para o notebook 01; as mesmas regras são contratos em schemas.validate_raw.
-    """
+    """Resumo das chaves para o notebook 01 (as regras estão em schemas.validate_raw)."""
     rows = []
     for name in CUSTOMER_TABLES:
         d = raw[name]
@@ -48,11 +40,7 @@ def validate_keys(raw: dict[str, pd.DataFrame]) -> pd.DataFrame:
 
 
 def merge_datasets(raw: dict[str, pd.DataFrame], validate: bool = True) -> pd.DataFrame:
-    """Une as tabelas numa base com 1 linha por cliente.
-
-    validate=True aplica as regras de negócio e as estatísticas da base unida
-    (schemas.validate_merged) e acrescenta-as ao relatório.
-    """
+    """Une as tabelas numa linha por cliente; com validate=True aplica os contratos da base unida."""
     clean = {n: d.drop(columns=[c for c in REPORTING_COLS if c in d.columns])
              for n, d in raw.items()}
     df = (
@@ -81,10 +69,7 @@ def data_quality(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def derivation_checks(df: pd.DataFrame) -> pd.Series:
-    """% de concordância das derivações exatas do guia (resumo para o notebook 01).
-
-    São contratos obrigatórios a 100% em schemas.validate_merged.
-    """
+    """% de concordância das derivações exatas, para o notebook 01 (contrato em schemas.validate_merged)."""
     total_rev = (df["Total Charges"] - df["Total Refunds"]
                  + df["Total Extra Data Charges"] + df["Total Long Distance Charges"])
     return pd.Series({

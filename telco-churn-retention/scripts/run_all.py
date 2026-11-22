@@ -1,10 +1,7 @@
-"""Corre o projeto completo, por ordem: pré-processamento, profiling e (se existir) modelação.
+"""Corre o projeto por ordem: pré-processamento, profiling e (se existir) modelação.
 
-Uso, a partir da raiz do repositório (telco-churn-retention):
-    python scripts/run_all.py
-
-Para saltar o profiling (mais lento):
-    python scripts/run_all.py --sem-profiling
+Uso, a partir da raiz do projeto:
+    python scripts/run_all.py [--sem-profiling]
 """
 import subprocess
 import sys
@@ -34,7 +31,6 @@ def main() -> None:
             continue
         print(f"\n=== {label} · {script} ===")
         t = time.time()
-        # check=True: pára no primeiro passo que falhe
         subprocess.run([sys.executable, str(path)], check=True, cwd=ROOT)
         print(f"✔ {label} concluído em {time.time() - t:.0f}s")
 

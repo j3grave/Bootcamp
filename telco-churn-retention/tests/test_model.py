@@ -1,7 +1,6 @@
-"""Modelo exportado (outputs/artifacts/final_model.joblib): qualidade mínima e uso pela app.
+"""Modelos exportados: qualidade mínima e uso pela app, sem retreinar.
 
-Não volta a treinar: carrega o artefacto e avalia-o no holdout exportado pelo pré-processamento.
-Precisa que a pipeline tenha corrido antes (python scripts/run_all.py --sem-profiling).
+Precisa da pipeline corrida antes (python scripts/run_all.py --sem-profiling).
 """
 import joblib
 import numpy as np
@@ -67,13 +66,10 @@ def test_bate_a_dummy_e_a_regra_de_negocio(holdout):
 
 
 def test_nao_e_pior_do_que_o_churn_score_ibm(bundle, holdout):
-    """Critério acordado com o grupo: 'não pior do que a IBM' (não inferioridade).
+    """Não inferioridade face ao Churn Score IBM.
 
-    O pedido original era AUC ≥ AUC IBM, que falha (0,936 vs 0,941). Em AUC aplica-se a mesma
-    regra de empate da seleção (modelling.tied_with_best): uma diferença menor do que o
-    desvio-padrão em CV do melhor dos dois (aqui, a IBM: 0,0077) está dentro do ruído entre
-    folds. Exige-se ainda PR AUC ≥ IBM e Brier < IBM (calibração, precisa para P × CLTV).
-    Justificação completa: README.md, "Critério de aceitação face ao Churn Score IBM".
+    AUC ≥ AUC IBM − desvio-padrão da IBM em CV (a regra de empate de tied_with_best),
+    PR AUC ≥ IBM e Brier < IBM. Ver README.md, "Critério de aceitação face ao Churn Score IBM".
     """
     y, p, ibm = holdout["y"], holdout["p"], holdout["ibm"]
     tolerance = bundle["benchmark_cv"]["auc_std"]
@@ -129,11 +125,8 @@ def test_lote_pequeno_ou_so_com_novos(bundle, priority, holdout):
     assert len(est) == 0 and len(new) == 5
 
 
-# --- Gate do modelo de priorização (decisão do grupo) -------------------------------------
-# O deploy exige: bater a Dummy e a regra de negócio, sobreajuste < 0,05, Brier < IBM e níveis
-# de risco calibrados. NÃO exige não inferioridade face à IBM: nos clientes estabelecidos a IBM
-# ordena melhor (AUC 0,939 vs 0,899, IC 95% da diferença sem o zero). Isso fica reportado
-# (17d_bootstrap_auc_priorizacao_vs_ibm.csv, MODEL_CARD, app) e não bloqueia a publicação.
+# --- Gate do modelo de priorização ---------------------------------------------------------
+# Não exige não inferioridade face à IBM, que ordena melhor nos clientes estabelecidos.
 # Ver README.md, "Gate do modelo de priorização".
 
 def test_priorizacao_sobreajuste_controlado(priority):

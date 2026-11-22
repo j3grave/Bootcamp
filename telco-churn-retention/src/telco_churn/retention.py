@@ -1,7 +1,6 @@
-"""Decisões de retenção: regra de onboarding para clientes novos.
+"""Decisões de retenção: priorização, custo-benefício, ações e regra de onboarding.
 
-As regras deste módulo são hipóteses de negócio tiradas da EDA, não efeitos causais
-demonstrados. Antes de serem adotadas devem ser testadas com um grupo de controlo.
+As regras são hipóteses tiradas da EDA, a testar com grupo de controlo antes de adotar.
 """
 import numpy as np
 import pandas as pd
@@ -10,11 +9,10 @@ ONBOARDING_ORDER = ["Onboarding prioritário", "Onboarding standard", "Sem açã
 
 
 def onboarding_segment(df: pd.DataFrame) -> pd.Series:
-    """Segmento de onboarding de um cliente novo (tenure <= 3), a partir de duas variáveis.
+    """Segmento de onboarding de um cliente novo (tenure <= 3).
 
-    Nos clientes novos, a saída concentra-se nos contratos Month-to-Month e, dentro destes,
-    na fibra ótica (notebook 02, secção 12). As condições são testadas por ordem: o primeiro
-    segmento cujas condições se verificam é o atribuído.
+    A saída concentra-se no Month-to-Month e, dentro deste, na fibra. Vale o primeiro segmento
+    cujas condições se verificam.
     """
     month_to_month = df["Contract"] == "Month-to-Month"
     fiber = df["Internet Type"] == "Fiber Optic"
@@ -56,10 +54,9 @@ def top_k_positions(score, k: int) -> np.ndarray:
 
 
 def compare_orderings(y, cltv, score_p, score_value, cuts=(0.1, 0.2, 0.3)) -> pd.DataFrame:
-    """Compara duas listas de contacto do mesmo tamanho: por P(churn) e por P(churn) × CLTV.
+    """Compara as listas por P(churn) e por P(churn) × CLTV, do mesmo tamanho.
 
-    Para cada corte (ex.: contactar 20% dos clientes) mostra quantos clientes as duas listas
-    têm em comum, que % dos churners cada uma apanha e que % do CLTV perdido cada uma cobre.
+    Por corte: clientes em comum e % de churners e de CLTV perdido que cada lista apanha.
     """
     y = np.asarray(y)
     cltv = np.asarray(cltv, dtype=float)
@@ -82,18 +79,16 @@ def compare_orderings(y, cltv, score_p, score_value, cuts=(0.1, 0.2, 0.3)) -> pd
 
 
 # --- Quantos clientes contactar: custo-benefício ------------------------------------------
-# PARÂMETROS DE NEGÓCIO — PRESSUPOSTOS, NÃO DADOS. Usados pelo notebook 02 (secção 11.2) e por
-# scripts/run_modelling.py. Substituir pelos valores reais da empresa antes de tirar conclusões.
+# Pressupostos de negócio, não dados: substituir pelos valores reais da empresa.
+# taxa_sucesso = % dos churners contactados que ficam por causa do contacto;
+# custo_contacto = custo por cliente contactado, com o incentivo, na unidade do CLTV.
 CENARIOS = {
     "Pessimista": {"taxa_sucesso": 0.10, "custo_contacto": 150},
     "Base":       {"taxa_sucesso": 0.20, "custo_contacto": 100},
     "Otimista":   {"taxa_sucesso": 0.30, "custo_contacto": 50},
 }
 
-# Pressupostos (não são dados do dataset; definidos no notebook 02, secção 11.2):
-#   taxa_sucesso    = % dos churners contactados que ficam por causa do contacto
-#   custo_contacto  = custo de contactar um cliente, incluindo o incentivo oferecido,
-#                     na mesma unidade do CLTV. Paga-se por todos os contactados, saiam ou não.
+
 def net_value_curve(y, cltv, score, success_rate: float, cost_per_contact: float) -> pd.DataFrame:
     """Valor líquido observado ao contactar os N primeiros da lista, para N = 1, 2, ...
 

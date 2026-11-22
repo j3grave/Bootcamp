@@ -1,11 +1,7 @@
-"""Relatórios HTML de exploração com ydata-profiling, na identidade visual do projeto.
+"""Relatórios ydata-profiling com a paleta do projeto.
 
-Três relatórios:
-  1. profile_dataset      -> perfil de uma tabela (ex.: base unida com todas as colunas)
-  2. profile_by_target    -> comparação Stayed vs Churned lado a lado (azul vs verde)
-  3. brand_html           -> aplica a paleta (navbar preta, títulos azuis, acentos verdes)
-
-Requer: pip install ydata-profiling "setuptools<81"
+profile_dataset (uma tabela), profile_by_target (Stayed vs Churned) e brand_html (aplica a
+paleta). Requer: pip install ydata-profiling "setuptools<81"
 """
 from __future__ import annotations
 

@@ -1,15 +1,11 @@
-"""Publica o modelo (Model repo) e a app (Space) no Hugging Face.
+"""Publica os modelos (Model repo) e a app (Space) no Hugging Face. Corre no deploy-hf.yml.
 
-Chamado pelo GitHub Actions (deploy-hf.yml) só depois de a pipeline e os testes passarem.
-
-Uso, a partir da raiz do projeto (telco-churn-retention):
-    HF_TOKEN=... python scripts/publish_hf.py --model-repo conta/telco-churn-model --space conta/telco-churn-app
+Uso, a partir da raiz do projeto:
+    HF_TOKEN=... python scripts/publish_hf.py --model-repo conta/modelo --space conta/app
     python scripts/publish_hf.py --model-repo conta/m --space conta/s --dry-run   # só prepara
 
-O Model repo recebe final_model.joblib (modelo core) e priority_model.joblib (clientes
-estabelecidos). O Space recebe a pasta app/, uma cópia do pacote src/telco_churn (para add_features e
-scoring) e um CSV de exemplo para o separador "Lote". A variável MODEL_REPO do Space é
-definida aqui, para a app saber de onde descarregar o modelo.
+O Model repo recebe final_model.joblib e priority_model.joblib. O Space recebe app/, uma
+cópia de src/telco_churn, um CSV de exemplo e a variável MODEL_REPO.
 """
 import argparse
 import os
