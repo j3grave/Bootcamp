@@ -95,7 +95,6 @@ telco-churn-retention/
 ├── MODEL_CARD.md             # publicado com o modelo
 ├── outputs/                  # figuras, tabelas, artefactos (git-ignored)
 ├── reports/                  # enunciado, status reports, dicionário de fontes
-├── requirements.txt          # versões mínimas
 ├── requirements-lock.txt     # versões exatas usadas nos resultados
 └── pyproject.toml
 ```
