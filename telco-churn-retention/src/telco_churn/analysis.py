@@ -1,9 +1,7 @@
 """Estatísticas descritivas e medidas de associação."""
 import numpy as np
 import pandas as pd
-from sklearn.feature_selection import mutual_info_classif
-
-from .config import RANDOM_STATE
+from scipy.stats import chi2_contingency
 
 
 def numeric_profile(data: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
@@ -41,31 +39,16 @@ def categorical_profile(data: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 
 def cramers_v(x: pd.Series, y: pd.Series) -> float:
-    """Cramér's V com correção de enviesamento (Bergsma, 2013). 0 = nada, 1 = perfeita."""
-    ct = pd.crosstab(x, y).to_numpy()
-    n = ct.sum()
-    expected = ct.sum(1, keepdims=True) @ ct.sum(0, keepdims=True) / n
-    chi2 = ((ct - expected) ** 2 / expected).sum()
-    r, k = ct.shape
-    phi2 = max(0.0, chi2 / n - (k - 1) * (r - 1) / (n - 1))
-    r_c, k_c = r - (r - 1) ** 2 / (n - 1), k - (k - 1) ** 2 / (n - 1)
-    return float(np.sqrt(phi2 / max(1e-12, min(k_c - 1, r_c - 1))))
+    """Cramér's V: força da associação entre duas variáveis categóricas (0 = nada, 1 = total)."""
+    ct = pd.crosstab(x, y)
+    chi2 = chi2_contingency(ct, correction=False)[0]
+    return float(np.sqrt(chi2 / (ct.to_numpy().sum() * (min(ct.shape) - 1))))
 
 
 def cramers_ranking(data: pd.DataFrame, cols: list[str], target: str) -> pd.Series:
+    """Cramér's V de cada variável categórica com o target, do maior para o menor."""
     return pd.Series({c: cramers_v(data[c], data[target]) for c in cols},
                      name="cramers_v").sort_values(ascending=False)
-
-
-def mutual_information(data: pd.DataFrame, num: list[str], cat: list[str],
-                       target: str) -> pd.Series:
-    """Mutual Information de cada variável com o target (num + cat)."""
-    X = data[num + cat].copy()
-    for c in cat:
-        X[c] = X[c].astype("category").cat.codes
-    mi = mutual_info_classif(X, data[target], discrete_features=[c in cat for c in X.columns],
-                             random_state=RANDOM_STATE)
-    return pd.Series(mi, index=X.columns, name="mutual_info").sort_values(ascending=False)
 
 
 def high_correlations(corr: pd.DataFrame, threshold: float = 0.8) -> pd.DataFrame:

@@ -1,7 +1,7 @@
 """Gráficos da modelação (notebook 02). Guardam a figura em outputs/figures/ via save_fig.
 
-Cores: azul = modelos individuais, verde = ensembles e modelo final,
-cinzento = linhas de base, preto = benchmark IBM e linhas de referência.
+Cores: azul = modelos, verde = modelo final, cinzento = linhas de base,
+preto = benchmark IBM e linhas de referência.
 """
 import math
 
@@ -13,13 +13,14 @@ from matplotlib.ticker import PercentFormatter
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import confusion_matrix, precision_recall_curve, roc_auc_score, roc_curve
 
-from .modelling import (BASELINE, BENCHMARK, ENSEMBLES, RULE_BASELINE, LOWER_IS_BETTER, METRICS, THRESHOLD_GRID,
-                        threshold_table)
+from .modelling import BASELINE, BENCHMARK, METRICS, RULE_BASELINE, threshold_table
 from .style import BG, BLUE, GREEN, GREY, GRID, INK, save_fig
 
 LIGHT_BLUE = "#AFC8FF"
 DARK_BLUE = "#0B2E80"
 CMAP_BLUE = LinearSegmentedColormap.from_list("bg_blue", [BG, BLUE])
+LOWER_IS_BETTER = [m for m, (_, higher) in METRICS.items() if not higher]
+THRESHOLD_GRID = np.linspace(0.05, 0.95, 91)   # limiares do gráfico de métricas por limiar
 
 METRIC_TITLES = {
     "auc": "ROC AUC", "pr_auc": "PR AUC", "brier": "Brier", "log_loss": "Log loss",
@@ -29,11 +30,12 @@ METRIC_TITLES = {
 
 
 def _color(model: str, best: str | None = None) -> str:
+    """Cor de um modelo nos gráficos de barras."""
     if model in (BASELINE, RULE_BASELINE):
         return GREY
     if model == BENCHMARK:
         return INK
-    if model == best or model in ENSEMBLES or model.startswith(tuple(ENSEMBLES)):
+    if model == best:
         return GREEN
     return BLUE
 
@@ -47,6 +49,7 @@ def _label_bars(ax, vals, xmax: float) -> None:
         else:
             ax.text(v + xmax * 0.015, i, f"{v:.3f}", va="center", color=INK, fontsize=7)
 
+
 def _annotate_cells(ax, text, dark, fontsize: int = 8) -> None:
     """Escreve o texto de cada célula de uma grelha (imshow); a branco nas células escuras."""
     for i, row in enumerate(text):
@@ -59,7 +62,7 @@ def _annotate_cells(ax, text, dark, fontsize: int = 8) -> None:
 def plot_cv_comparison(cv: pd.DataFrame, name: str = "21_cv_modelos",
                        title: str = "AUC em validação cruzada (5-fold, treino)", show: bool = True):
     """AUC médio ± desvio-padrão por modelo, com as referências (regra de negócio a cinzento,
-    Churn Score IBM a preto, avaliado nos mesmos folds). Ensembles a verde."""
+    Churn Score IBM a preto, avaliado nos mesmos folds)."""
     cv = cv.drop(index=BASELINE, errors="ignore").sort_values("auc")
     colors = [_color(i) for i in cv.index]
     fig, ax = plt.subplots(figsize=(7.5, 0.42 * len(cv) + 1.2))
@@ -108,25 +111,6 @@ def plot_metrics_panel(view: pd.DataFrame, std: pd.DataFrame | None = None,
     note = ("barra = média em CV (± desvio-padrão)  ·  losango = treino" if train is not None
             else "")
     fig.suptitle(title + (f"\n{note}" if note else ""), color=INK, fontweight="bold", y=1.0)
-    save_fig(fig, name, show)
-
-
-def plot_metrics_heatmap(view: pd.DataFrame, name: str = "22b_heatmap_metricas_cv",
-                         title: str = "Métricas por modelo — validação cruzada",
-                         show: bool = True):
-    """Grelha modelo × métrica. A cor é a posição do modelo em cada métrica (azul = melhor),
-    já invertida no log loss e no Brier; o número é o valor real."""
-    view = view.sort_values("auc", ascending=False).astype(float)
-    rank = view.rank(pct=True)
-    rank[LOWER_IS_BETTER] = view[LOWER_IS_BETTER].rank(pct=True, ascending=False)
-    fig, ax = plt.subplots(figsize=(12, 0.45 * len(view) + 1.6))
-    ax.imshow(rank.values, cmap=CMAP_BLUE, aspect="auto", vmin=0, vmax=1.05)
-    _annotate_cells(ax, np.vectorize("{:.3f}".format)(view.values), rank.values > 0.7)
-    ax.set_xticks(range(view.shape[1]), [METRIC_TITLES[m] for m in view.columns], fontsize=8)
-    ax.set_yticks(range(view.shape[0]), view.index, fontsize=8)
-    ax.xaxis.tick_top()
-    ax.grid(False)
-    ax.set_title(title + "\n(cor = posição em cada métrica; azul mais forte = melhor)", pad=28)
     save_fig(fig, name, show)
 
 
@@ -243,43 +227,6 @@ def plot_threshold(y, p, model: str, marker: float | None = None,
     save_fig(fig, name, show)
 
 
-def plot_diversity(corr: pd.DataFrame, name: str = "20_diversidade_modelos", show: bool = True):
-    """Correlação entre as probabilidades dos modelos. Valores baixos = erros diferentes."""
-    fig, ax = plt.subplots(figsize=(0.75 * len(corr) + 3, 0.6 * len(corr) + 2))
-    vmin = max(0.0, float(np.floor((corr.values.min() - 0.05) * 20) / 20))
-    ax.imshow(corr.values, cmap=CMAP_BLUE, vmin=vmin, vmax=1)
-    _annotate_cells(ax, np.vectorize("{:.2f}".format)(corr.values),
-                    (corr.values - vmin) / (1 - vmin) > 0.6)
-    ax.set_xticks(range(len(corr)), corr.columns, rotation=35, ha="right", fontsize=8)
-    ax.set_yticks(range(len(corr)), corr.index, fontsize=8)
-    ax.grid(False)
-    ax.set_title("Diversidade entre modelos: correlação das probabilidades out-of-fold")
-    save_fig(fig, name, show)
-
-
-def plot_mlp_training(mlp, name: str = "23e_rede_neuronal_treino", show: bool = True):
-    """Curva de aprendizagem da MLP: loss no treino e accuracy na validação interna.
-
-    mlp: o MLPClassifier já treinado (ex.: pipeline.named_steps['clf']).
-    """
-    fig, ax1 = plt.subplots(figsize=(8, 3.8))
-    epochs = np.arange(1, len(mlp.loss_curve_) + 1)
-    ax1.plot(epochs, mlp.loss_curve_, color=BLUE, linewidth=2, label="log loss (treino)")
-    ax1.set_xlabel("Época")
-    ax1.set_ylabel("Log loss (treino)", color=BLUE)
-    if getattr(mlp, "validation_scores_", None) is not None:
-        ax2 = ax1.twinx()
-        ax2.plot(epochs, mlp.validation_scores_, color=GREEN, linewidth=2,
-                 label="accuracy (validação interna)")
-        ax2.set_ylabel("Accuracy (validação interna)", color=GREEN)
-        ax2.grid(False)
-        best = int(np.argmax(mlp.validation_scores_)) + 1
-        ax1.axvline(best, color=INK, linestyle="--", linewidth=1)
-        ax1.text(best, ax1.get_ylim()[1], f" melhor época: {best}", va="top", fontsize=8)
-    ax1.set_title("Rede neuronal (MLP): evolução do treino com early stopping")
-    save_fig(fig, name, show)
-
-
 # --- Holdout e priorização -----------------------------------------------------------------
 def plot_roc_calibration(y: pd.Series, probas: dict, show: bool = True):
     """Curvas ROC (esq.) e de calibração (dir.) no holdout."""
@@ -339,16 +286,13 @@ def plot_priority_map(prio: pd.DataFrame, top_n: int, name: str = "26_mapa_prior
 def plot_net_value(curves: dict, name: str = "30_valor_liquido", show: bool = True):
     """Valor líquido observado vs nº de clientes contactados, uma linha por cenário.
 
-    curves: {nome do cenário: DataFrame de retention.net_value_curve}. O ponto marca o máximo.
+    curves: {nome do cenário: DataFrame de retention.net_value_curve}.
     """
     palette = [GREY, BLUE, GREEN]
     fig, ax = plt.subplots(figsize=(7, 4.2))
     for (scenario, curve), color in zip(curves.items(), palette):
         ax.plot(curve["clientes_contactados"], curve["valor_liquido"], color=color, linewidth=1.8,
                 label=scenario)
-        best = curve["valor_liquido"].idxmax()
-        ax.scatter(curve.loc[best, "clientes_contactados"], curve.loc[best, "valor_liquido"],
-                   color=color, s=30, zorder=3)
     ax.axhline(0, color=INK, linewidth=0.8)
     ax.set_title("Valor líquido da campanha por cenário — clientes estabelecidos (holdout)")
     ax.set_xlabel("Clientes contactados (por ordem de P × CLTV)")

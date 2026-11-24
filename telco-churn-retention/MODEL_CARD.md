@@ -13,10 +13,7 @@ tags:
 
 Estimar a probabilidade de um cliente de telecomunicações sair, P(churn), para que a equipa de retenção contacte primeiro quem tem maior perda esperada, P(churn) × CLTV.
 
-O repositório tem dois modelos, usados pela app Gradio do projeto:
-
-- `priority_model.joblib` — **modelo de priorização**, treinado só com clientes estabelecidos (tenure > 3). Pontua e ordena os clientes na app.
-- `final_model.joblib` — **modelo core**, treinado com todos os tenures. É o que se compara com o Churn Score da IBM. Nos clientes novos (tenure ≤ 3) dá só um valor indicativo, porque extrapola.
+O repositório tem um modelo, `final_model.joblib`, usado pela app Gradio do projeto. Nos clientes estabelecidos (tenure > 3) a P(churn) serve para ordenar a lista de contactos. Nos clientes novos (tenure ≤ 3) é só um valor indicativo, porque o modelo extrapola.
 
 ## Dados
 
@@ -33,11 +30,11 @@ Ficam de fora as colunas que codificam o resultado (Customer Status, Churn Label
 
 ## Seleção
 
-Nove modelos (regressão logística, árvore, kNN, MLP, Random Forest, Extra Trees, Gradient Boosting, Soft Voting, Stacking), afinados com `RandomizedSearchCV` e comparados no mesmo 5-fold estratificado. As referências são a taxa de churn (Dummy), uma regra de negócio sem ML (Month-to-Month, tenure ≤ 12 meses, fibra ótica) e o Churn Score da IBM.
+Quatro modelos (regressão logística, árvore de decisão, Random Forest, Gradient Boosting), afinados com `GridSearchCV` em grelhas pequenas e comparados no mesmo 5-fold estratificado. As referências são a taxa de churn (Dummy), uma regra de negócio sem ML (Month-to-Month, tenure ≤ 12 meses, fibra ótica) e o Churn Score da IBM.
 
-Entre o melhor em AUC e os empatados com ele (diferença menor do que um desvio-padrão entre folds) escolhe-se o mais simples. O holdout é usado uma única vez.
+Decidimos escolher o modelo de maior ROC AUC em CV, exceto se a regressão logística ficar a menos de 0,01 dele. O holdout é usado uma única vez.
 
-As métricas desta versão estão na secção seguinte, gerada a partir do artefacto no momento da publicação.
+As métricas desta versão estão na secção final, gerada a partir do artefacto no momento da publicação.
 
 ## Como usar
 
@@ -45,26 +42,23 @@ As métricas desta versão estão na secção seguinte, gerada a partir do artef
 import joblib
 from huggingface_hub import hf_hub_download
 
-repo = "tvf007/EDSBG1TP2-model"
-priority = joblib.load(hf_hub_download(repo_id=repo, filename="priority_model.joblib"))  # tenure > 3
-core = joblib.load(hf_hub_download(repo_id=repo, filename="final_model.joblib"))
+bundle = joblib.load(hf_hub_download(repo_id="tvf007/EDSBG1TP2-model",
+                                     filename="final_model.joblib"))
 # bundle["model"]: Pipeline scikit-learn (pré-processador + classificador)
 # bundle["features"]: colunas de entrada (as derivadas calculam-se com telco_churn.features.add_features)
-# priority["risk_levels"]: níveis de risco (médio ≥ 0,30, alto ≥ 0,60)
-# priority["capacity_cuts"]: P(churn) a partir da qual um cliente estabelecido está no top 10% / 20%
+# bundle["capacity_cut"]: P(churn) a partir da qual um cliente estabelecido está no top 20% de risco
 ```
 
-Requer `scikit-learn==1.9.1`, a versão com que os artefactos foram gravados.
+Requer `scikit-learn==1.9.1`, a versão com que o artefacto foi gravado.
 
 ## Limitações
 
-- **Clientes novos.** Os recentes que ficam são registados como *Joined* e saem do treino; os que saem ficam como *Churned*. Por isso, no treino, quase todos os clientes com tenure ≤ 3 saíram. É um efeito do registo, não comportamento. Para estes clientes a app mostra um aviso e usa uma regra de onboarding.
-- **Clientes estabelecidos: a IBM ordena melhor.** Com tenure > 3, o modelo de priorização tem AUC 0,899 contra 0,939 do Churn Score, e o IC 95% da diferença (bootstrap emparelhado) não inclui zero. É publicado porque dá probabilidades calibradas (Brier 0,097 contra 0,234), necessárias para P × CLTV, e usa só variáveis conhecidas. Não substitui o Churn Score como ordenação.
-- **Base completa (modelo core).** Em ROC AUC está empatado com a IBM (diferença dentro do desvio-padrão entre folds); é melhor em PR AUC e muito mais bem calibrado.
+- **Clientes novos.** Os recentes que ficam são registados como *Joined* e saem do treino; os que saem ficam como *Churned*. Por isso, no treino, todos os clientes com tenure ≤ 3 saíram. É um efeito do registo, não comportamento. Para estes clientes a app mostra um aviso e usa uma regra de onboarding.
+- **A IBM ordena melhor.** O Churn Score tem AUC mais alto, sobretudo nos clientes estabelecidos. Decidimos usar este modelo porque dá probabilidades calibradas (Brier muito mais baixo), necessárias para P × CLTV, e usa só variáveis conhecidas antes da saída. Não substitui o Churn Score como ordenação.
 - **Desconto.** O modelo prevê risco, não o efeito de uma ação. A eficácia do desconto na app é um pressuposto a medir com grupo de controlo.
 - **Dados sintéticos e sem datas.** Os padrões podem não se transferir para dados reais e não há validação temporal.
 - **Importância das variáveis** mostra associação, não causa.
 
 ## Publicação
 
-Publicado pelo GitHub Actions (`deploy-hf.yml`) só depois de a pipeline correr e de os testes passarem. O modelo de priorização tem de bater a Dummy e a regra de negócio, ter sobreajuste < 0,05, Brier abaixo da IBM e níveis de risco calibrados.
+Publicado pelo GitHub Actions (`deploy-hf.yml`) só depois de a pipeline correr e de os testes passarem. O modelo tem de bater a Dummy e a regra de negócio, ter sobreajuste < 0,05 e um Brier abaixo do da IBM nos clientes estabelecidos.

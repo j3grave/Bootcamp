@@ -17,6 +17,7 @@ from telco_churn.config import TARGET
 
 
 def main() -> None:
+    """Gera os três relatórios ydata-profiling."""
     df = data.merge_datasets(data.load_raw())
     df_model, _ = features.split_population(df)
     num, cat, _ = features.feature_roles(df_model)

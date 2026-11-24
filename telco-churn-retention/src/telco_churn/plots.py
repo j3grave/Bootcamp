@@ -12,6 +12,7 @@ from .style import (BG, BLACK, BLUE, CMAP_DIVERGING, GREEN, GREY, GRID, INK, TAR
 
 
 def _slug(text: str) -> str:
+    """Texto usado no nome do ficheiro da figura (sem espaços nem barras)."""
     return text.replace(" ", "_").replace("/", "_")
 
 
@@ -28,6 +29,7 @@ def _order_categories(s: pd.Series) -> list:
 
 # --- Target ----------------------------------------------------------------------
 def plot_target(y: pd.Series, show: bool = True):
+    """Nº e % de clientes Stayed e Churned."""
     counts = y.map(TARGET_LABELS).value_counts().reindex(["Stayed", "Churned"])
     fig, ax = plt.subplots(figsize=(5, 3.4))
     bars = ax.bar(counts.index, counts.values, color=[BLUE, GREEN], width=0.6)
@@ -42,6 +44,7 @@ def plot_target(y: pd.Series, show: bool = True):
 
 # --- Numéricas ---------------------------------------------------------------------
 def plot_numeric(df: pd.DataFrame, col: str, target: str, show: bool = True, prefix="08"):
+    """Distribuição de uma variável numérica por target: histograma e boxplot."""
     fig, axes = plt.subplots(1, 2, figsize=(10, 3.2), gridspec_kw={"width_ratios": [2.2, 1]})
     for t in (0, 1):
         sns.histplot(df.loc[df[target] == t, col], bins=30, stat="density", element="step",
@@ -59,6 +62,7 @@ def plot_numeric(df: pd.DataFrame, col: str, target: str, show: bool = True, pre
 
 
 def plot_correlation(corr: pd.DataFrame, show: bool = True):
+    """Matriz de correlação (Spearman) das numéricas, só o triângulo inferior."""
     mask = np.triu(np.ones_like(corr, dtype=bool), k=1)
     fig, ax = plt.subplots(figsize=(11, 9))
     sns.heatmap(corr, mask=mask, cmap=CMAP_DIVERGING, center=0, vmin=-1, vmax=1, annot=True,
@@ -157,6 +161,7 @@ def plot_ranking(s: pd.Series, title: str, name: str, highlight: set | None = No
 
 
 def plot_leakage_checks(df: pd.DataFrame, target: str, show: bool = True):
+    """Taxa de churn por Satisfaction Score e distribuição do Churn Score IBM por target."""
     sat = df.groupby("Satisfaction Score")[target].mean()
     fig, axes = plt.subplots(1, 2, figsize=(11, 3.4))
     bars = axes[0].bar(sat.index.astype(str), sat.values,

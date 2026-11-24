@@ -30,7 +30,7 @@ NEW_NUM = ["n_add_on_services", "avg_hist_charge", "charge_delta"]
 NEW_CAT = ["has_refund"]
 
 # Em Churned + Stayed, tenure <= 3 é quase sempre churn por causa do registo dos estados,
-# não do comportamento (README.md, "Porque há dois modelos").
+# não do comportamento (README.md, "Clientes novos").
 NEW_CUSTOMER_MAX_TENURE = 3
 
 
@@ -48,9 +48,9 @@ def is_established(df: pd.DataFrame) -> pd.Series:
 
 
 def tenure_status_table(df: pd.DataFrame) -> pd.DataFrame:
-    """Nº de clientes por faixa de tenure e Customer Status, com a taxa de churn core.
+    """Nº de clientes por faixa de tenure e Customer Status, com a taxa de churn (Churned + Stayed).
 
-    A taxa usa só Churned e Stayed, como o modelo core. Mostra o artefacto dos clientes novos.
+    A taxa usa só Churned e Stayed, como o modelo. Mostra o artefacto dos clientes novos.
     """
     faixa = is_established(df).map({False: f"1–{NEW_CUSTOMER_MAX_TENURE} meses",
                                      True: f"{NEW_CUSTOMER_MAX_TENURE + 1} ou mais meses"})

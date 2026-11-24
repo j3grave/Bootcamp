@@ -1,4 +1,4 @@
-"""Usar os modelos exportados: um cliente, um lote e a decisão do desconto.
+"""Usar o modelo exportado: um cliente, um lote e a decisão do desconto.
 
 Não depende do Gradio; a app só trata da interface.
 """
@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from .features import NEW_CAT, NEW_CUSTOMER_MAX_TENURE, NEW_NUM, add_features
-from .modelling import contact_priority, priority_list, risk_level
+from .modelling import in_top_capacity, priority_list
 from .retention import ONBOARDING_ORDER, onboarding_segment
 
 ID_COL, CLTV_COL = "Customer ID", "CLTV"
@@ -55,7 +55,7 @@ def predict(bundle: dict, customers: pd.DataFrame) -> np.ndarray:
 
 
 def is_new_customer(tenure) -> np.ndarray:
-    """Clientes com poucos meses de casa: o modelo extrapola (ver README.md, "Porque há dois modelos")."""
+    """Clientes com poucos meses de casa: o modelo extrapola (ver README.md, "Clientes novos")."""
     return np.asarray(tenure) <= NEW_CUSTOMER_MAX_TENURE
 
 
@@ -102,38 +102,32 @@ def local_factors(bundle: dict, customer: pd.DataFrame, top: int = 5) -> pd.Data
     return out.reindex(out["efeito_em_P"].abs().sort_values(ascending=False).index).head(top)
 
 
-def score_batch(priority_bundle: dict, customers: pd.DataFrame,
-                core_bundle: dict | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+def score_batch(bundle: dict, customers: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Pontua um lote e devolve (clientes estabelecidos, clientes novos).
 
-    Estabelecidos (tenure > 3): modelo de priorização, por P(churn) × CLTV, com nível de risco
-    e prioridade de contacto. Novos (tenure ≤ 3): segmento de onboarding e, se core_bundle for
-    dado, a P(churn) do core só como valor indicativo.
+    Estabelecidos (tenure > 3): ordenados por P(churn) × CLTV e marcados se estão no top 20%
+    de risco. Novos (tenure ≤ 3): segmento de onboarding; a P(churn) aparece só como valor
+    indicativo, porque nestes clientes o modelo extrapola.
     """
-    for col in (ID_COL, CLTV_COL):
+    for col in (ID_COL, CLTV_COL, "Tenure in Months"):
         if col not in customers.columns:
             raise ValueError(f"O ficheiro tem de ter a coluna '{col}'")
     customers = customers.reset_index(drop=True)
-    if "Tenure in Months" not in customers.columns:
-        raise ValueError("Faltam colunas: Tenure in Months")
     new = is_new_customer(customers["Tenure in Months"])
     established, newcomers = customers[~new], customers[new]
 
     if len(established):
-        p = predict(priority_bundle, established)
-        est = priority_list(established, p)
-        est["nivel_risco"] = risk_level(est["p_churn"], priority_bundle["risk_levels"])
-        est["prioridade_contacto"] = contact_priority(est["p_churn"],
-                                                      priority_bundle["capacity_cuts"])
+        est = priority_list(established, predict(bundle, established))
+        est["top_20_risco"] = in_top_capacity(est["p_churn"], bundle["capacity_cut"])
     else:
         est = pd.DataFrame(columns=[ID_COL, CLTV_COL, "p_churn", "perda_esperada", "rank",
-                                    "decil", "nivel_risco", "prioridade_contacto"])
+                                    "decil", "top_20_risco"])
 
     cols = [ID_COL, CLTV_COL, "Tenure in Months", "Contract", "Internet Type"]
     nw = newcomers[cols].copy()
     nw["onboarding"] = onboarding_segment(newcomers)
-    if core_bundle is not None and len(newcomers):
-        nw["p_churn_indicativo"] = predict(core_bundle, newcomers)
+    if len(newcomers):
+        nw["p_churn_indicativo"] = predict(bundle, newcomers)
     nw["ordem"] = nw["onboarding"].map({s: i for i, s in enumerate(ONBOARDING_ORDER)})
     nw = nw.sort_values(["ordem", CLTV_COL], ascending=[True, False]).drop(columns="ordem")
     nw["aviso"] = "cliente novo: P extrapolada; seguir a regra de onboarding"

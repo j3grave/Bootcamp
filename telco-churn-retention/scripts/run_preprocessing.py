@@ -18,6 +18,7 @@ from telco_churn.style import apply_theme
 
 
 def main() -> None:
+    """Corre a fase 1: validação, união, EDA, split e exportação."""
     ensure_dirs()
     apply_theme()
 
@@ -50,8 +51,6 @@ def main() -> None:
     for c in cat:
         plots.plot_categorical_detail(df_model, c, TARGET, rate, cramers[c], show=False)
 
-    mi = analysis.mutual_information(df_model, num, cat, TARGET)
-    mi.to_csv(TAB_DIR / "07_mutual_information.csv")
     plots.plot_leakage_checks(df_model, TARGET, show=False)
 
     df_model = features.add_features(df_model)

@@ -4,8 +4,8 @@ Uso, a partir da raiz do projeto:
     HF_TOKEN=... python scripts/publish_hf.py --model-repo conta/modelo --space conta/app
     python scripts/publish_hf.py --model-repo conta/m --space conta/s --dry-run   # só prepara
 
-O Model repo recebe final_model.joblib e priority_model.joblib. O Space recebe app/, uma
-cópia de src/telco_churn, um CSV de exemplo e a variável MODEL_REPO.
+O Model repo recebe final_model.joblib e o model card. O Space recebe app/, uma cópia de
+src/telco_churn, um CSV de exemplo e a variável MODEL_REPO.
 """
 import argparse
 import os
@@ -24,35 +24,22 @@ from telco_churn import scoring  # noqa: E402
 from telco_churn.config import ARTIFACTS_DIR, DATA_PROCESSED  # noqa: E402
 
 MODEL = ARTIFACTS_DIR / "final_model.joblib"
-PRIORITY_MODEL = ARTIFACTS_DIR / "priority_model.joblib"
 
 
-def metrics_section(bundle: dict, priority: dict) -> str:
+def metrics_section(bundle: dict) -> str:
     """Tabela de métricas desta versão, para o fim do model card."""
-    rows = [("Modelo core: " + bundle["name"], bundle["cv"], bundle["holdout"]),
-            ("Churn Score IBM (benchmark)", bundle["benchmark_cv"], bundle["benchmark_holdout"]),
-            ("Modelo de priorização (tenure > 3): " + priority["name"], priority["cv"],
-             priority["holdout"]),
-            ("Churn Score IBM nos mesmos clientes (tenure > 3)", priority["benchmark_cv"],
-             priority["benchmark_holdout"])]
+    rows = [("Modelo: " + bundle["name"], "todos", bundle["holdout"]),
+            ("Churn Score IBM", "todos", bundle["benchmark_holdout"]),
+            ("Modelo: " + bundle["name"], "tenure > 3", bundle["holdout_estabelecidos"]),
+            ("Churn Score IBM", "tenure > 3", bundle["benchmark_holdout_estabelecidos"])]
     lines = ["## Métricas desta versão", "",
              f"Seleção: {bundle['selection']}", "",
-             "| | AUC CV (± dp) | AUC holdout | PR AUC holdout | Brier holdout |",
-             "|---|---|---|---|---|"]
-    for name, cv, hold in rows:
-        h = f"{hold['auc']:.3f} | {hold['pr_auc']:.3f} | {hold['brier']:.3f}"
-        lines.append(f"| {name} | {cv['auc']:.3f} ± {cv['auc_std']:.3f} | {h} |")
-    lv, cap = priority["risk_levels"], priority["capacity_cuts"]
-    b = priority["bootstrap_vs_ibm"]
-    lines += ["", "O modelo de priorização e a sua linha IBM são avaliados no holdout com "
-                  "tenure > 3. Nesses clientes a IBM ordena melhor: diferença de AUC "
-                  f"{b['diferenca']:+.3f}, IC 95% [{b['ic_inferior']:+.3f}; {b['ic_superior']:+.3f}] "
-                  "(bootstrap emparelhado). Não é gate do deploy.", "",
-              f"Nível de risco (absoluto): baixo < {lv['médio']:.0%}, médio "
-              f"{lv['médio']:.0%}–{lv['alto']:.0%}, alto ≥ {lv['alto']:.0%}. "
-              f"Prioridade de contacto (capacidade, só clientes estabelecidos, modelo de "
-              f"priorização): top 10% se P ≥ {cap['top 10%']:.3f}, top 20% se P ≥ "
-              f"{cap['top 20%']:.3f}."]
+             f"AUC em validação cruzada: {bundle['cv']['auc']:.3f} ± {bundle['cv']['auc_std']:.3f}.",
+             "", "| | Clientes do holdout | AUC | PR AUC | Brier |", "|---|---|---|---|---|"]
+    for name, subset, m in rows:
+        lines.append(f"| {name} | {subset} | {m['auc']:.3f} | {m['pr_auc']:.3f} | {m['brier']:.3f} |")
+    lines += ["", f"Top 20% de risco dos clientes estabelecidos: P(churn) ≥ "
+                  f"{bundle['capacity_cut']:.3f}."]
     return "\n".join(lines) + "\n"
 
 
@@ -68,6 +55,7 @@ def stage_space(staging: Path, bundle: dict) -> None:
 
 
 def main() -> None:
+    """Prepara os ficheiros e, sem --dry-run, publica o modelo e a app."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model-repo", default=os.environ.get("HF_MODEL_REPO"), required=False)
     parser.add_argument("--space", default=os.environ.get("HF_SPACE"), required=False)
@@ -79,15 +67,14 @@ def main() -> None:
         sys.exit("Falta: " + ", ".join(missing) + ". No GitHub, criar como *Repository "
                  "variables* (Settings > Secrets and variables > Actions > Variables), não "
                  "dentro de um Environment.")
-    bundle, priority = joblib.load(MODEL), joblib.load(PRIORITY_MODEL)
+    bundle = joblib.load(MODEL)
 
     staging = Path(tempfile.mkdtemp(prefix="hf_"))
     model_dir, space_dir = staging / "model", staging / "space"
     model_dir.mkdir()
     shutil.copy(MODEL, model_dir / "final_model.joblib")
-    shutil.copy(PRIORITY_MODEL, model_dir / "priority_model.joblib")
     card = (ROOT / "MODEL_CARD.md").read_text(encoding="utf-8")
-    (model_dir / "README.md").write_text(card + "\n" + metrics_section(bundle, priority), encoding="utf-8")
+    (model_dir / "README.md").write_text(card + "\n" + metrics_section(bundle), encoding="utf-8")
     stage_space(space_dir, bundle)
     print(f"Ficheiros preparados em {staging}")
     if args.dry_run:
@@ -121,8 +108,9 @@ def main() -> None:
     # Público, para o Space descarregar o modelo sem token
     step(f"Criar/confirmar o Model repo {args.model_repo} (público)", api.create_repo,
          args.model_repo, repo_type="model", private=False, exist_ok=True)
-    step("Enviar os modelos e o model card", api.upload_folder, folder_path=model_dir,
+    step("Enviar o modelo e o model card", api.upload_folder, folder_path=model_dir,
          repo_id=args.model_repo, repo_type="model",
+         delete_patterns=["priority_model.joblib"],   # modelo antigo, já não é usado
          commit_message=f"Modelo {bundle['name']} (AUC holdout {bundle['holdout']['auc']:.3f})")
     step(f"Criar/confirmar o Space {args.space}", api.create_repo, args.space,
          repo_type="space", space_sdk="gradio", exist_ok=True)

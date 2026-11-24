@@ -1,9 +1,9 @@
 """App Gradio de retenção: risco de churn e decisão de desconto.
 
-Cliente individual: P(churn), nível de risco, prioridade de contacto, fatores e desconto.
-Lote: CSV com duas listas, clientes estabelecidos (priority_model, por P(churn) × CLTV) e
-clientes novos (segmento de onboarding; o final_model dá só um valor indicativo).
-Os modelos vêm do Model repo em MODEL_REPO ou, localmente, de outputs/artifacts/.
+Cliente individual: P(churn), se está no top 20% de risco, fatores e decisão de desconto.
+Lote: CSV com duas listas, clientes estabelecidos (por P(churn) × CLTV) e clientes novos
+(segmento de onboarding; a P(churn) é só indicativa).
+O modelo vem do Model repo em MODEL_REPO ou, localmente, de outputs/artifacts/.
 
 Correr a partir da raiz do projeto: python app/app.py
 """
@@ -35,13 +35,14 @@ HERE = Path(__file__).resolve().parent
 # O pacote telco_churn vem copiado para app/ no deploy; localmente usa-se o de src/
 sys.path.insert(0, str(HERE if (HERE / "telco_churn").exists() else HERE.parent / "src"))
 
-from telco_churn import modelling, retention, scoring  # noqa: E402
+from telco_churn import retention, scoring  # noqa: E402
 
 BLUE, GREEN, BLACK = "#3777FF", "#0EE071", "#000000"
 LOCAL_ARTIFACTS = HERE.parent / "outputs" / "artifacts"
 
 
 def load_bundle(filename: str) -> dict:
+    """Carrega o modelo do Hugging Face (MODEL_REPO) ou, localmente, de outputs/artifacts/."""
     repo = os.environ.get("MODEL_REPO")
     if repo:
         from huggingface_hub import hf_hub_download
@@ -55,12 +56,10 @@ def load_bundle(filename: str) -> dict:
     raise FileNotFoundError(f"Sem {filename}: definir MODEL_REPO ou correr scripts/run_pipeline.py")
 
 
-CORE = load_bundle("final_model.joblib")        # clientes novos: só valor indicativo
-PRIORITY = load_bundle("priority_model.joblib")  # clientes estabelecidos (tenure > 3)
-FORM = CORE["form"]                              # mesmas variáveis de entrada nos dois modelos
+MODEL = load_bundle("final_model.joblib")
+FORM = MODEL["form"]
 COLUMNS = list(FORM)
-RISK_LEVELS = PRIORITY["risk_levels"]
-CAPACITY_CUTS = PRIORITY["capacity_cuts"]
+CAPACITY_CUT = MODEL["capacity_cut"]   # P(churn) do top 20% dos clientes estabelecidos
 
 # Ordem e grupos do formulário (as variáveis que não estão aqui vão para "Outros")
 GROUPS = {
@@ -82,6 +81,7 @@ ORDER = [c for cols in GROUPS.values() for c in cols]
 
 
 def _component(col: str):
+    """Campo do formulário: lista de opções nas categóricas, número nas numéricas."""
     s = FORM[col]
     if "options" in s:
         return gr.Dropdown(choices=s["options"], value=s["default"], label=col)
@@ -90,10 +90,11 @@ def _component(col: str):
 
 
 def _customer(values) -> pd.DataFrame:
+    """Uma linha com os valores do formulário; um campo apagado volta ao valor típico."""
     row = dict(zip(ORDER, values))
     for col in ORDER:
         if "options" not in FORM[col] and row[col] is None:
-            row[col] = FORM[col]["default"]   # campo apagado: volta ao valor típico
+            row[col] = FORM[col]["default"]
     return pd.DataFrame([row])[COLUMNS]
 
 
@@ -108,30 +109,23 @@ def _pct(x: float, decimals: int = 1) -> str:
 
 
 def _metrics(m: dict) -> str:
+    """AUC, PR-AUC e Brier num texto curto."""
     return ", ".join(f"{k} {m[c]:.3f}".replace(".", ",")
                      for k, c in (("AUC", "auc"), ("PR-AUC", "pr_auc"), ("Brier", "brier")))
 
 
-def _risk_text(level: str) -> str:
-    lo, hi = _pct(RISK_LEVELS["médio"], 0), _pct(RISK_LEVELS["alto"], 0)
-    return {"alto": f"**alto** (P ≥ {hi})", "médio": f"**médio** (P entre {lo} e {hi})",
-            "baixo": f"**baixo** (P < {lo})"}[level]
-
-
-def _priority_text(priority: str) -> str:
-    base = "dos clientes estabelecidos"
-    return {"top 10%": f"**top 10% {base}** — dentro da capacidade, mesmo com só 10% de contactos",
-            "top 20%": f"**top 20% {base}** — dentro da capacidade se a equipa contactar 20%",
-            "fora da capacidade": f"**fora do top 20% {base}** — só com capacidade acima de 20%"
-            }[priority]
+def _capacity_text(p: float) -> str:
+    """Diz se o cliente está dentro da capacidade de contacto (top 20% de risco)."""
+    if p >= CAPACITY_CUT:
+        return f"**dentro do top 20% de risco** dos clientes estabelecidos (P ≥ {_pct(CAPACITY_CUT)})"
+    return f"**fora do top 20% de risco** dos clientes estabelecidos (P < {_pct(CAPACITY_CUT)})"
 
 
 def assess(cltv, discount, months, effectiveness, *values):
     """Separador 'Cliente individual': risco, fatores e decisão de desconto."""
     customer = _customer(values)
     new_customer = bool(scoring.is_new_customer(customer["Tenure in Months"])[0])
-    bundle = CORE if new_customer else PRIORITY
-    p = float(scoring.predict(bundle, customer)[0])
+    p = float(scoring.predict(MODEL, customer)[0])
     if new_customer:
         segment = retention.onboarding_segment(customer).iloc[0]
         lines = [f"## P(churn) = {_pct(p)} _(indicativo)_",
@@ -142,12 +136,7 @@ def assess(cltv, discount, months, effectiveness, *values):
                  f"Segmento de onboarding: **{segment}** (regra de onboarding: contrato e tipo "
                  "de internet). Os clientes novos não entram na prioridade de contacto."]
     else:
-        level = modelling.risk_level([p], RISK_LEVELS)[0]
-        priority = modelling.contact_priority([p], CAPACITY_CUTS)[0]
-        lines = [f"## P(churn) = {_pct(p)}",
-                 f"Nível de risco: {_risk_text(level)}",
-                 f"Prioridade de contacto: {_priority_text(priority)}",
-                 f"_Modelo de priorização ({PRIORITY['name']}, treinado com clientes de tenure > 3)._"]
+        lines = [f"## P(churn) = {_pct(p)}", f"Prioridade de contacto: {_capacity_text(p)}"]
 
     d = scoring.discount_decision(p, float(cltv), float(discount), float(months),
                                   float(effectiveness))
@@ -165,19 +154,19 @@ def assess(cltv, discount, months, effectiveness, *values):
            "O risco ou o valor do cliente não chegam para pagar o desconto: "
            "procure uma ação mais barata ou reduza o desconto.")
     )
-    factors = scoring.local_factors(bundle, customer).assign(
+    factors = scoring.local_factors(MODEL, customer).assign(
         efeito_em_P=lambda t: t["efeito_em_P"].map(lambda v: ("+" if v >= 0 else "−") + _pct(abs(v))))
     factors.columns = ["Variável", "Valor do cliente", "Valor típico", "Efeito em P(churn)"]
     return "\n\n".join(lines), decision, factors
 
 
 def score_file(file):
-    """Separador 'Lote': estabelecidos (modelo de priorização) e novos (onboarding), à parte."""
+    """Separador 'Lote': estabelecidos (por P × CLTV) e novos (onboarding), à parte."""
     if file is None:
         raise gr.Error("Escolha primeiro um ficheiro CSV.")
     try:
         customers = pd.read_csv(file, keep_default_na=False, na_values=[""])
-        est, new = scoring.score_batch(PRIORITY, customers, core_bundle=CORE)
+        est, new = scoring.score_batch(MODEL, customers)
     except ValueError as e:
         raise gr.Error(str(e))
     folder = Path(tempfile.mkdtemp())
@@ -187,10 +176,9 @@ def score_file(file):
     shown_est = est.head(50).assign(p_churn=lambda t: t["p_churn"].astype(float).round(3),
                                     perda_esperada=lambda t: t["perda_esperada"].astype(float).round(0))
     shown_new = new.round({"p_churn_indicativo": 3})
-    in_capacity = int((est["prioridade_contacto"] != "fora da capacidade").sum())
-    summary = (f"**{len(est)} clientes estabelecidos** pontuados pelo modelo de priorização · "
-               f"{int((est['nivel_risco'] == 'alto').sum())} com risco alto "
-               f"(P ≥ {_pct(RISK_LEVELS['alto'], 0)}) · {in_capacity} no top 20% de prioridade.  \n"
+    summary = (f"**{len(est)} clientes estabelecidos**, ordenados por P(churn) × CLTV · "
+               f"{int(est['top_20_risco'].sum())} no top 20% de risco "
+               f"(P ≥ {_pct(CAPACITY_CUT)}).  \n"
                f"**{len(new)} clientes novos** (tenure ≤ 3) numa lista à parte, por segmento de "
                "onboarding: o modelo extrapola nestes clientes.")
     return (summary, shown_est, shown_new, gr.DownloadButton(value=str(est_path), visible=True),
@@ -216,13 +204,13 @@ h1, h2 {{ color: {BLUE}; }}
 with gr.Blocks(title="Retenção de clientes — Telco") as demo:
     gr.Markdown(
         f"# Retenção de clientes — risco de churn\n"
-        f"Clientes estabelecidos (tenure > 3): modelo de priorização **{PRIORITY['name']}**, "
-        f"holdout {_metrics(PRIORITY['holdout'])}. Modelo core **{CORE['name']}**: holdout "
-        f"{_metrics(CORE['holdout'])}. Dados sintéticos IBM (Telco, Califórnia).\n\n"
-        f"ℹ️ **Este modelo não substitui o Churn Score da IBM.** Nos clientes estabelecidos, a "
-        f"IBM ordena melhor ({_metrics(PRIORITY['benchmark_holdout'])}). O modelo é usado porque "
-        "dá probabilidades calibradas (Brier mais baixo), necessárias para P(churn) × CLTV e "
-        "para a decisão de desconto, e porque usa só variáveis conhecidas.")
+        f"Modelo **{MODEL['name']}**. Holdout, clientes estabelecidos (tenure > 3): "
+        f"{_metrics(MODEL['holdout_estabelecidos'])}; Churn Score IBM nos mesmos clientes: "
+        f"{_metrics(MODEL['benchmark_holdout_estabelecidos'])}. "
+        "Dados sintéticos IBM (Telco, Califórnia).\n\n"
+        "ℹ️ Usamos este modelo e não o Churn Score da IBM porque dá probabilidades calibradas "
+        "(Brier mais baixo), de que P(churn) × CLTV e a decisão de desconto precisam, e porque "
+        "usa só variáveis conhecidas antes da saída.")
     with gr.Tab("Cliente individual"):
         inputs = []
         with gr.Row():
@@ -235,7 +223,7 @@ with gr.Blocks(title="Retenção de clientes — Telco") as demo:
                             inputs += [_component(c) for c in cols]
             with gr.Column(scale=2):
                 gr.Markdown("### Decisão de desconto")
-                cltv = gr.Number(value=round(CORE["cltv_median"]), label="CLTV do cliente (€)",
+                cltv = gr.Number(value=round(MODEL["cltv_median"]), label="CLTV do cliente (€)",
                                  minimum=0, info="Por omissão, a mediana do treino")
                 discount = gr.Number(value=10, label="Desconto mensal (€)", minimum=0)
                 months = gr.Number(value=6, label="Duração do desconto (meses)", minimum=0,
@@ -258,12 +246,10 @@ with gr.Blocks(title="Retenção de clientes — Telco") as demo:
             "Carregue um CSV com uma linha por cliente e as colunas `Customer ID`, `CLTV` e as "
             f"{len(COLUMNS)} variáveis do formulário (por exemplo, `data/processed/test.csv`). "
             "Devolve duas listas:\n\n"
-            "- **Clientes estabelecidos** (tenure > 3), pontuados pelo modelo de priorização e "
-            "ordenados por **perda esperada = P(churn) × CLTV**, com o nível de risco (baixo < 30%, "
-            "médio 30–60%, alto ≥ 60%) e a prioridade de contacto (top 10% / 20% dos clientes "
-            "estabelecidos);\n"
+            "- **Clientes estabelecidos** (tenure > 3), ordenados por **perda esperada = "
+            "P(churn) × CLTV** e marcados quando estão no top 20% de risco;\n"
             "- **Clientes novos** (tenure ≤ 3), à parte, por segmento de onboarding. A P(churn) "
-            "do modelo core aparece só como valor indicativo: nestes clientes o modelo extrapola.")
+            "aparece só como valor indicativo: nestes clientes o modelo extrapola.")
         upload = gr.File(label="CSV de clientes", file_types=[".csv"])
         go = gr.Button("Pontuar lote", variant="primary")
         summary = gr.Markdown()
