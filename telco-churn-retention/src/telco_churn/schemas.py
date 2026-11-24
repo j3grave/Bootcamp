@@ -36,6 +36,7 @@ class DataValidationError(ValueError):
 
 @dataclass(frozen=True)
 class Rule:
+    """Uma regra de validação: nome, camada, severidade e função que conta as linhas a falhar."""
     name: str
     layer: str
     severity: str
@@ -60,6 +61,7 @@ def _row_rule(check: Callable[[pd.DataFrame], pd.Series]) -> Callable[[pd.DataFr
 
 
 def _column(col: str, *checks, unique: bool = False) -> Callable[[pd.DataFrame], int]:
+    """Regra sobre uma só coluna (verificações pandera e, opcionalmente, valores únicos)."""
     return _pandera(pa.DataFrameSchema({col: pa.Column(checks=list(checks), unique=unique)}))
 
 
@@ -148,6 +150,7 @@ def _describe(col: str, check: pa.Check) -> str:
 
 
 def raw_rules() -> list[Rule]:
+    """Regras dos 5 ficheiros brutos: colunas e tipos, chaves e domínios."""
     rules = [Rule(f"colunas e tipos ({len(cols)} colunas)", table, ERRO,
                   _pandera(pa.DataFrameSchema({c: pa.Column(t) for c, t in cols.items()},
                                               strict=True)))
@@ -178,10 +181,12 @@ def validate_raw(raw: dict[str, pd.DataFrame]) -> pd.DataFrame:
 
 # --- 3. Base unida: regras de negócio e estatísticas -----------------------------------------
 def _is(df, col, value):
+    """True nas linhas em que a coluna tem o valor indicado."""
     return df[col] == value
 
 
 def merged_rules() -> list[Rule]:
+    """Regras da base unida: regras de negócio, derivações e estatísticas."""
     churned = lambda d: _is(d, "Customer Status", "Churned")   # noqa: E731
     no_internet = lambda d: _is(d, "Internet Service", "No")   # noqa: E731
     no_phone = lambda d: _is(d, "Phone Service", "No")         # noqa: E731
@@ -272,11 +277,13 @@ def validate_split(train: pd.DataFrame, test: pd.DataFrame, features: list[str],
 
 # --- Relatório e aplicação --------------------------------------------------------------------
 def _row(name: str, layer: str, severity: str, n_failures: int) -> dict:
+    """Linha do relatório de validação."""
     return {"regra": name, "camada": layer, "severidade": severity,
             "resultado": "passa" if n_failures == 0 else "falha", "linhas_a_falhar": n_failures}
 
 
 def _evaluate(rule: Rule, df: pd.DataFrame) -> dict:
+    """Aplica uma regra e devolve a linha do relatório."""
     return _row(rule.name, rule.layer, rule.severity, rule.count_failures(df))
 
 

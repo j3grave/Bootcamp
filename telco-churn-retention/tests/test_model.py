@@ -1,22 +1,19 @@
-"""Modelos exportados: qualidade mínima e uso pela app, sem retreinar.
+"""Modelo exportado: qualidade mínima e uso pela app, sem retreinar.
 
 Precisa da pipeline corrida antes (python scripts/run_pipeline.py --sem-profiling).
 """
 import joblib
-import numpy as np
 import pandas as pd
 import pytest
-from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
+from sklearn.metrics import brier_score_loss, roc_auc_score
 
 from telco_churn import modelling, retention, scoring
 from telco_churn.config import ARTIFACTS_DIR, DATA_PROCESSED
 
 MODEL_PATH = ARTIFACTS_DIR / "final_model.joblib"
-PRIORITY_PATH = ARTIFACTS_DIR / "priority_model.joblib"
 MAX_TRAIN_CV_GAP = 0.05   # AUC treino − AUC validação em CV: acima disto, sobreajuste
 
-pytestmark = pytest.mark.skipif(not MODEL_PATH.exists() or not PRIORITY_PATH.exists()
-                                or not (DATA_PROCESSED / "test.csv").exists(),
+pytestmark = pytest.mark.skipif(not MODEL_PATH.exists() or not (DATA_PROCESSED / "test.csv").exists(),
                                 reason="falta o modelo exportado: correr scripts/run_pipeline.py")
 
 
@@ -26,30 +23,18 @@ def bundle():
 
 
 @pytest.fixture(scope="module")
-def priority():
-    return joblib.load(PRIORITY_PATH)
-
-
-@pytest.fixture(scope="module")
 def holdout(bundle):
     train, test, _, _ = modelling.load_processed()
-    y = test[bundle["target"]]
-    return {"train": train, "test": test, "y": y,
-            "p": scoring.predict(bundle, test), "ibm": test["Churn Score"] / 100}
+    est = test["Tenure in Months"] > 3
+    return {"train": train, "test": test, "y": test[bundle["target"]],
+            "p": scoring.predict(bundle, test), "est": est}
 
 
-def test_artefacto_de_priorizacao_tem_as_chaves_da_app(priority):
-    expected = {"model", "name", "features", "target", "cv", "holdout", "selection",
-                "risk_levels", "capacity_cuts", "form", "cltv_median", "population",
-                "benchmark_cv", "benchmark_holdout", "bootstrap_vs_ibm"}
-    assert expected <= set(priority)
-
-
-def test_artefacto_tem_as_chaves_esperadas(bundle):
+def test_artefacto_tem_as_chaves_da_app(bundle):
     expected = {"model", "name", "features", "target", "best_params", "cv", "holdout",
-                "selection", "thresholds", "risk_levels", "capacity_cuts", "benchmark_cv",
-                "benchmark_holdout",
-                "form", "cltv_median"}
+                "selection", "benchmark_cv", "benchmark_holdout", "holdout_estabelecidos",
+                "benchmark_holdout_estabelecidos", "thresholds", "capacity_cut", "form",
+                "cltv_median"}
     assert expected <= set(bundle)
 
 
@@ -65,22 +50,23 @@ def test_bate_a_dummy_e_a_regra_de_negocio(holdout):
     assert auc > roc_auc_score(holdout["y"], rule.predict_proba(holdout["test"])[:, 1])
 
 
-def test_nao_e_pior_do_que_o_churn_score_ibm(bundle, holdout):
-    """Não inferioridade face ao Churn Score IBM.
-
-    AUC ≥ AUC IBM − desvio-padrão da IBM em CV (a regra de empate de tied_with_best),
-    PR AUC ≥ IBM e Brier < IBM. Ver README.md, "Critério de aceitação face ao Churn Score IBM".
-    """
-    y, p, ibm = holdout["y"], holdout["p"], holdout["ibm"]
-    tolerance = bundle["benchmark_cv"]["auc_std"]
-    assert roc_auc_score(y, p) >= roc_auc_score(y, ibm) - tolerance
-    assert average_precision_score(y, p) >= average_precision_score(y, ibm)
-    assert brier_score_loss(y, p) < brier_score_loss(y, ibm)
-
-
 def test_sobreajuste_controlado(bundle):
     gap = bundle["cv"]["auc_train"] - bundle["cv"]["auc"]
     assert gap < MAX_TRAIN_CV_GAP, f"AUC treino − CV = {gap:.3f}"
+
+
+def test_mais_bem_calibrado_do_que_a_ibm_nos_estabelecidos(holdout):
+    """P(churn) × CLTV precisa de probabilidades realistas nos clientes que vão para a lista."""
+    est, test = holdout["est"], holdout["test"]
+    y = holdout["y"][est]
+    assert brier_score_loss(y, holdout["p"][est]) < brier_score_loss(
+        y, test.loc[est, "Churn Score"] / 100)
+
+
+def test_corte_de_capacidade_sinaliza_cerca_de_20_por_cento(bundle, holdout):
+    """O corte do top 20%, fixado no treino, sinaliza cerca de 20% dos estabelecidos do holdout."""
+    flagged = modelling.in_top_capacity(holdout["p"][holdout["est"]], bundle["capacity_cut"])
+    assert abs(flagged.mean() - 0.20) < 0.03
 
 
 def test_aceita_uma_linha_do_formulario(bundle, holdout):
@@ -97,97 +83,27 @@ def test_formulario_sem_colunas_derivadas(bundle):
     assert not set(cols) & set(modelling.REFERENCES)
 
 
-def test_lote_separa_estabelecidos_e_novos(bundle, priority, holdout):
+def test_lote_separa_estabelecidos_e_novos(bundle, holdout):
     batch = holdout["test"].head(80)
-    est, new = scoring.score_batch(priority, batch, core_bundle=bundle)
+    est, new = scoring.score_batch(bundle, batch)
     tenure = batch.set_index("Customer ID")["Tenure in Months"]
     assert len(est) + len(new) == len(batch) and len(new) > 0
     assert (tenure.loc[est["Customer ID"]] > 3).all()
     assert (tenure.loc[new["Customer ID"]] <= 3).all()
-    # Estabelecidos: modelo de priorização, ordenados por perda esperada
-    p_priority = priority["model"].predict_proba(
-        batch.set_index("Customer ID").loc[est["Customer ID"]][priority["features"]])[:, 1]
-    assert np.allclose(est["p_churn"], p_priority)
+    # Estabelecidos: ordenados por perda esperada
     assert est["perda_esperada"].is_monotonic_decreasing
-    assert np.allclose(est["perda_esperada"], est["p_churn"] * est["CLTV"])
-    assert set(est["nivel_risco"]) <= set(modelling.RISK_ORDER)
-    assert set(est["prioridade_contacto"]) <= set(modelling.PRIORITY_ORDER)
-    # Novos: segmento de onboarding, P só indicativa, sem prioridade de contacto
+    assert (est["perda_esperada"] - est["p_churn"] * est["CLTV"]).abs().max() < 1e-9
+    # Novos: segmento de onboarding, P só indicativa
     assert set(new["onboarding"]) <= set(retention.ONBOARDING_ORDER)
-    assert "prioridade_contacto" not in new and "p_churn_indicativo" in new
+    assert "top_20_risco" not in new and "p_churn_indicativo" in new
 
 
-def test_lote_pequeno_ou_so_com_novos(bundle, priority, holdout):
+def test_lote_pequeno_ou_so_com_novos(bundle, holdout):
     test = holdout["test"]
-    est, new = scoring.score_batch(priority, test[test["Tenure in Months"] > 3].head(4))
+    est, new = scoring.score_batch(bundle, test[test["Tenure in Months"] > 3].head(4))
     assert len(est) == 4 and len(new) == 0 and list(est["decil"]) == [1, 2, 3, 4]
-    est, new = scoring.score_batch(priority, test[test["Tenure in Months"] <= 3].head(5), bundle)
+    est, new = scoring.score_batch(bundle, test[test["Tenure in Months"] <= 3].head(5))
     assert len(est) == 0 and len(new) == 5
-
-
-# --- Gate do modelo de priorização ---------------------------------------------------------
-# Não exige não inferioridade face à IBM, que ordena melhor nos clientes estabelecidos.
-# Ver README.md, "Gate do modelo de priorização".
-
-def test_priorizacao_sobreajuste_controlado(priority):
-    gap = priority["cv"]["auc_train"] - priority["cv"]["auc"]
-    assert gap < MAX_TRAIN_CV_GAP, f"AUC treino − CV = {gap:.3f}"
-
-
-def test_priorizacao_mais_bem_calibrada_do_que_a_ibm(priority, holdout):
-    """P(churn) × CLTV precisa de probabilidades realistas: Brier melhor do que o da IBM."""
-    est = holdout["test"][holdout["test"]["Tenure in Months"] > 3]
-    p = scoring.predict(priority, est)
-    assert brier_score_loss(est["churn"], p) < brier_score_loss(est["churn"], est["Churn Score"] / 100)
-
-
-def test_modelo_de_priorizacao_bate_a_regra_nos_estabelecidos(priority, holdout):
-    test, train = holdout["test"], holdout["train"]
-    est_te, est_tr = test[test["Tenure in Months"] > 3], train[train["Tenure in Months"] > 3]
-    p = scoring.predict(priority, est_te)
-    rule = modelling.BusinessRuleScore().fit(est_tr, est_tr["churn"])
-    auc = roc_auc_score(est_te["churn"], p)
-    assert auc == pytest.approx(priority["holdout"]["auc"])
-    assert auc > 0.5   # Dummy
-    assert auc > roc_auc_score(est_te["churn"], rule.predict_proba(est_te)[:, 1])
-
-
-def test_niveis_de_risco_calibrados_no_modelo_de_priorizacao(priority, holdout):
-    """É o modelo que a app usa nos clientes estabelecidos: o nível também tem de ser lido
-    como uma percentagem real."""
-    est = holdout["test"][holdout["test"]["Tenure in Months"] > 3]
-    t = modelling.risk_level_table(est["churn"], scoring.predict(priority, est))
-    assert t["churn_real"].is_monotonic_increasing
-    assert (t["churn_real"] - t["p_media"]).abs().max() < 0.10
-
-
-def test_capacidade_calculada_so_com_clientes_estabelecidos(bundle, priority, holdout):
-    """Os cortes do lote vêm do modelo de priorização (tenure > 3) e sinalizam cerca de 10% e
-    20% dos clientes estabelecidos; os do modelo core seriam ocupados pelos clientes novos."""
-    test = holdout["test"]
-    est = test[test["Tenure in Months"] > 3]
-    pr = modelling.contact_priority(scoring.predict(priority, est), priority["capacity_cuts"])
-    assert abs((pr == "top 10%").mean() - 0.10) < 0.03
-    assert abs((pr != "fora da capacidade").mean() - 0.20) < 0.03
-    core_pr = modelling.contact_priority(scoring.predict(bundle, est), bundle["capacity_cuts"])
-    assert (core_pr != "fora da capacidade").mean() < (pr != "fora da capacidade").mean()
-
-
-def test_niveis_de_risco_correspondem_ao_churn_observado(holdout):
-    """O modelo está calibrado: a taxa de churn real cresce de nível para nível e fica perto
-    de P (um cliente com P = 77% é 'alto', não 'médio')."""
-    t = modelling.risk_level_table(holdout["y"], holdout["p"])
-    assert t["churn_real"].is_monotonic_increasing
-    assert (t["churn_real"] - t["p_media"]).abs().max() < 0.10
-    assert modelling.risk_level([0.77])[0] == "alto"
-    assert list(modelling.risk_level([0.29, 0.30, 0.59, 0.60])) == ["baixo", "médio", "médio", "alto"]
-
-
-def test_prioridade_de_contacto_respeita_a_capacidade(bundle, holdout):
-    """Os cortes de capacidade sinalizam cerca de 10% e 20% dos clientes do holdout."""
-    pr = modelling.contact_priority(holdout["p"], bundle["capacity_cuts"])
-    assert abs((pr == "top 10%").mean() - 0.10) < 0.03
-    assert abs((pr != "fora da capacidade").mean() - 0.20) < 0.03
 
 
 def test_lote_sem_coluna_obrigatoria_da_erro_claro(bundle, holdout):

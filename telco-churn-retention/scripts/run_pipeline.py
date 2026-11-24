@@ -17,6 +17,7 @@ SPACE = os.environ.get("HF_SPACE", "tvf007/EDSBG1TP2")
 
 
 def ask(question: str, default: bool) -> bool:
+    """Pergunta sim/não no terminal; Enter aceita o valor por omissão."""
     answer = input(f"{question} {'[S/n]' if default else '[s/N]'} ").strip().lower()
     return default if not answer else answer.startswith("s")
 
@@ -41,10 +42,11 @@ def plan(c: dict) -> list[tuple[str, list[str]]]:
 
 
 def interactive() -> dict:
+    """Pergunta no terminal que fases correr e devolve as escolhas."""
     c = {"preprocessing": ask("Fase 1 · pré-processamento e EDA?", True),
          "profiling": ask("Fase 1b · relatórios ydata-profiling (lento)?", False),
          "modelling": ask("Fase 2 · modelação?", True)}
-    c["rapido"] = c["modelling"] and ask("  Modo rápido (N_ITER = 3, sem variantes)?", False)
+    c["rapido"] = c["modelling"] and ask("  Modo rápido (sem a variante com Satisfaction Score)?", False)
     c["tests"] = ask("Testes (pytest)?", True)
     c["publish"] = ask("Publicação no Hugging Face (corre os testes antes)?", False)
     c.update(dry_run=True, model_repo=MODEL_REPO, space=SPACE)
@@ -61,6 +63,7 @@ def interactive() -> dict:
 
 
 def main() -> None:
+    """Corre as fases escolhidas, por ordem; pára na primeira que falhar."""
     if len(sys.argv) > 1 or not sys.stdin.isatty():
         c = dict(preprocessing=True, profiling="--sem-profiling" not in sys.argv,
                  modelling=True, rapido=False, tests=False, publish=False)

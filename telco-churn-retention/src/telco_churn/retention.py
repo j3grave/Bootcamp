@@ -115,37 +115,23 @@ def expected_contacts(p, cltv, success_rate: float, cost_per_contact: float) -> 
 
 
 def scenario_table(y, p, cltv, scenarios: dict) -> pd.DataFrame:
-    """N ótimo por cenário: pela regra do valor esperado e pelo valor observado no holdout."""
+    """Por cenário: nº de clientes a contactar pela regra do valor esperado e o valor líquido
+    que essa decisão teria dado no holdout."""
     rows = []
     for name, params in scenarios.items():
         success_rate, cost = params["taxa_sucesso"], params["custo_contacto"]
         curve = net_value_curve(y, cltv, np.asarray(p) * np.asarray(cltv), success_rate, cost)
         n_expected = expected_contacts(p, cltv, success_rate, cost)
-        value_with_rule = 0.0
-        if n_expected > 0:
-            value_with_rule = curve["valor_liquido"].iloc[n_expected - 1]
-        best = curve["valor_liquido"].idxmax()
+        value_with_rule = curve["valor_liquido"].iloc[n_expected - 1] if n_expected else 0.0
         rows.append({
             "cenario": name,
             "taxa_sucesso": success_rate,
             "custo_contacto": cost,
-            "N_regra_valor_esperado": n_expected,
-            "pct_base_regra": n_expected / len(curve),
-            "valor_liquido_com_N_regra": value_with_rule,
-            "N_otimo_observado": int(curve.loc[best, "clientes_contactados"]),
-            "valor_liquido_maximo_observado": curve.loc[best, "valor_liquido"],
+            "N_a_contactar": n_expected,
+            "pct_base": n_expected / len(curve),
+            "valor_liquido_no_holdout": value_with_rule,
         })
     return pd.DataFrame(rows).set_index("cenario")
-
-
-def sensitivity_grid(p, cltv, success_rates, costs) -> pd.DataFrame:
-    """% da base a contactar (regra do valor esperado) para cada taxa de sucesso × custo."""
-    grid = pd.DataFrame(index=pd.Index(success_rates, name="taxa_sucesso"),
-                        columns=pd.Index(costs, name="custo_contacto"), dtype=float)
-    for success_rate in success_rates:
-        for cost in costs:
-            grid.loc[success_rate, cost] = expected_contacts(p, cltv, success_rate, cost) / len(p)
-    return grid
 
 
 # --- Ações sugeridas para a lista de intervenção -------------------------------------------

@@ -15,12 +15,12 @@ short_description: Risco de churn e decisão de desconto (EDSB 2026)
 
 App do projeto Telco Customer Churn (EDSB 2026, NOVA IMS).
 
-- **Cliente individual:** preencher as variáveis do cliente (por omissão, os valores típicos do treino) e obter P(churn), o nível de risco (baixo < 30%, médio 30–60%, alto ≥ 60%), a prioridade de contacto (top 10% ou top 20% dos clientes estabelecidos), os principais fatores e a recomendação de desconto.
+- **Cliente individual:** preencher as variáveis do cliente (por omissão, os valores típicos do treino) e obter P(churn), se o cliente está no top 20% de risco dos clientes estabelecidos, os principais fatores e a recomendação de desconto.
 - **Lote:** carregar um CSV (ex.: `exemplo_lote.csv`) e descarregar duas listas:
-  - clientes estabelecidos (tenure > 3), pontuados pelo modelo de priorização e ordenados por P(churn) × CLTV;
+  - clientes estabelecidos (tenure > 3), ordenados por P(churn) × CLTV;
   - clientes novos (tenure ≤ 3), por segmento de onboarding, com aviso de que o modelo extrapola.
 
-Os clientes com tenure ≤ 3 não entram na prioridade de contacto. No treino, quase todos os clientes com tão poucos meses saíram por causa da forma como os estados foram registados, por isso a P(churn) deles é uma extrapolação.
+Os clientes com tenure ≤ 3 não entram na prioridade de contacto. No treino, todos os clientes com tão poucos meses saíram por causa da forma como os estados foram registados, por isso a P(churn) deles é uma extrapolação.
 
 **Desconto:** oferecer se P(churn) × eficácia × CLTV > desconto mensal × meses. A eficácia é um pressuposto: o modelo prevê o risco de saída, não o efeito do desconto.
 

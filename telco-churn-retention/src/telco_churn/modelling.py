@@ -1,115 +1,63 @@
-"""Modelação: modelos, ensembles, avaliação em CV, holdout e priorização P(churn) × CLTV.
+"""Modelação: modelos, avaliação em validação cruzada, holdout e priorização P(churn) × CLTV.
 
-O protocolo e a descrição de cada modelo estão no README.md ("Protocolo" e "Modelos").
+O protocolo e a descrição de cada modelo estão no README.md ("Fase 2 — Modelação").
 """
 import joblib
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
-from scipy.stats import loguniform
 from sklearn import metrics
 from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.dummy import DummyClassifier
-from sklearn.ensemble import (ExtraTreesClassifier, HistGradientBoostingClassifier,
-                              RandomForestClassifier, StackingClassifier, VotingClassifier)
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import TargetEncoder
 from sklearn.tree import DecisionTreeClassifier
 
 from .config import ARTIFACTS_DIR, DATA_PROCESSED, RANDOM_STATE
 from .preprocessing import build_preprocessors
 
 CV = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
-THRESHOLD = 0.5   # limiar por omissão das métricas que precisam de uma decisão sim/não
-THRESHOLD_GRID = np.linspace(0.05, 0.95, 91)   # limiares testados nas curvas e no melhor F1
+THRESHOLD = 0.5            # limiar por omissão das métricas que precisam de uma decisão sim/não
+CAPACITY_SHARE = 0.20      # a equipa de retenção contacta, no máximo, 20% dos clientes
+LR_MARGIN = 0.01           # margem de AUC para preferirmos a regressão logística (ver select_model)
 
 # --- Modelos ----------------------------------------------------------------------------
-# Modelos base: (pré-processador, estimador, espaço de procura do RandomizedSearchCV)
-#   "linear" = imputação + escala + one-hot  -> modelos sensíveis à escala (LR, kNN, MLP)
-#   "trees"  = imputação + one-hot, sem escala -> modelos de árvores
+# Modelo: (pré-processador, estimador, grelha do GridSearchCV)
+#   "linear" = imputação + escala + one-hot -> regressão logística
+#   "trees"  = imputação + one-hot, sem escala -> árvores
 BASE_MODELS = {
     "Logistic Regression": (
         "linear", LogisticRegression(max_iter=3000),
-        {"clf__C": loguniform(1e-3, 1e2)}),
+        {"clf__C": [0.1, 1, 10]}),
     "Decision Tree": (
         "trees", DecisionTreeClassifier(random_state=RANDOM_STATE),
-        {"clf__max_depth": [3, 4, 5, 6, 8, 10], "clf__min_samples_leaf": [5, 10, 20, 50],
-         "clf__criterion": ["gini", "entropy"]}),
-    "k-Nearest Neighbors": (
-        "linear", KNeighborsClassifier(),
-        {"clf__n_neighbors": [15, 25, 35, 50, 75, 100], "clf__weights": ["uniform", "distance"]}),
-    "Neural Network (MLP)": (
-        "linear", MLPClassifier(max_iter=500, early_stopping=True, validation_fraction=0.15,
-                                n_iter_no_change=20, random_state=RANDOM_STATE),
-        {"clf__hidden_layer_sizes": [(16,), (32,), (64,), (32, 16), (64, 32)],
-         "clf__activation": ["relu", "tanh"], "clf__alpha": loguniform(1e-5, 1e-1),
-         "clf__learning_rate_init": loguniform(1e-4, 1e-2)}),
+        {"clf__max_depth": [4, 6, 8], "clf__min_samples_leaf": [20, 50]}),
     "Random Forest": (
-        "trees", RandomForestClassifier(n_estimators=300, random_state=RANDOM_STATE),
-        {"clf__max_depth": [None, 6, 10, 16], "clf__min_samples_leaf": [1, 3, 5, 10],
-         "clf__max_features": ["sqrt", 0.3, 0.5]}),
-    "Extra Trees": (
-        "trees", ExtraTreesClassifier(n_estimators=300, random_state=RANDOM_STATE),
-        {"clf__max_depth": [None, 8, 12, 20], "clf__min_samples_leaf": [1, 3, 5, 10],
-         "clf__max_features": ["sqrt", 0.3, 0.5]}),
+        "trees", RandomForestClassifier(n_estimators=300, random_state=RANDOM_STATE, n_jobs=-1),
+        {"clf__min_samples_leaf": [1, 5], "clf__max_features": ["sqrt", 0.3]}),
     "Gradient Boosting": (
-        "trees", HistGradientBoostingClassifier(random_state=RANDOM_STATE),
-        {"clf__learning_rate": loguniform(0.02, 0.2), "clf__max_iter": [150, 300, 500],
-         "clf__max_leaf_nodes": [7, 15, 31], "clf__min_samples_leaf": [10, 20, 50],
-         "clf__l2_regularization": loguniform(1e-3, 10)}),
+        "trees", HistGradientBoostingClassifier(max_iter=500, random_state=RANDOM_STATE),
+        {"clf__learning_rate": [0.03, 0.1], "clf__max_leaf_nodes": [7, 15]}),
 }
 BASELINE = "Baseline (taxa de churn)"
 RULE_BASELINE = "Regra de negócio (pontos)"
 BENCHMARK = "Churn Score IBM (benchmark)"
 REFERENCES = [BASELINE, RULE_BASELINE, BENCHMARK]   # comparam-se, mas nunca são escolhidas
 
-# Regra de parcimónia: do mais simples (e mais fácil de explicar) para o mais complexo.
-# Entre modelos empatados com o melhor em CV, escolhe-se o que aparece primeiro nesta lista.
-COMPLEXITY_ORDER = ["Logistic Regression", "Decision Tree", "k-Nearest Neighbors",
-                    "Random Forest", "Extra Trees", "Gradient Boosting", "Neural Network (MLP)",
-                    "Soft Voting", "Stacking"]
-ENSEMBLES = ["Soft Voting", "Stacking"]
-
-# Membros dos ensembles, fixados antes de ver os resultados para a CV continuar justa.
-# O sklearn pede um nome curto sem espaços para cada membro.
-ENSEMBLE_MEMBERS = {
-    "Logistic Regression": "lr",
-    "Neural Network (MLP)": "mlp",
-    "Random Forest": "rf",
-    "Extra Trees": "et",
-    "Gradient Boosting": "gb",
-}
-
-# Descrição curta de cada modelo (tabelas do notebook). Detalhe no README.md ("Modelos").
+# Descrição curta de cada modelo (tabela do notebook 02)
 MODEL_INFO = pd.DataFrame([
-    (BASELINE, "referência", "—",
-     "Dá a todos os clientes a taxa de churn do treino. Qualquer modelo útil tem de a bater."),
-    (RULE_BASELINE, "referência (sem ML)", "—",
+    (BASELINE, "referência", "Dá a todos os clientes a taxa de churn do treino."),
+    (RULE_BASELINE, "referência (sem ML)",
      "1 ponto por fator de risco: Month-to-Month, tenure ≤ 12 meses, fibra ótica (0 a 3)."),
-    ("Logistic Regression", "linear", "linear",
-     "Soma ponderada das variáveis passada por uma sigmoide. Simples, estável e interpretável."),
-    ("Decision Tree", "árvore", "trees",
-     "Sequência de perguntas sim/não sobre as variáveis. Fácil de explicar, mas instável."),
-    ("k-Nearest Neighbors", "distância", "linear",
-     "Prevê com a taxa de churn dos k clientes mais parecidos no treino."),
-    ("Neural Network (MLP)", "rede neuronal", "linear",
-     "Camadas de neurónios com ativação não linear; generaliza a regressão logística."),
-    ("Random Forest", "ensemble: bagging", "trees",
-     "Média de centenas de árvores, cada uma treinada numa amostra diferente dos dados."),
-    ("Extra Trees", "ensemble: bagging", "trees",
-     "Como o Random Forest, mas com cortes aleatórios: mais diversidade, menos variância."),
-    ("Gradient Boosting", "ensemble: boosting", "trees",
-     "Árvores pequenas em sequência, cada uma a corrigir os erros das anteriores."),
-    ("Soft Voting", "ensemble: voting", "ambos",
-     "Média das probabilidades dos membros do ensemble."),
-    ("Stacking", "ensemble: stacking", "ambos",
-     "Uma regressão logística aprende a melhor combinação das probabilidades dos membros."),
-], columns=["modelo", "familia", "pre_processador", "como_funciona"]).set_index("modelo")
+    ("Logistic Regression", "linear", "Soma ponderada das variáveis passada por uma sigmoide."),
+    ("Decision Tree", "árvore", "Sequência de perguntas sim/não sobre as variáveis."),
+    ("Random Forest", "ensemble: bagging", "Média de 300 árvores, cada uma treinada numa amostra."),
+    ("Gradient Boosting", "ensemble: boosting",
+     "Árvores pequenas em sequência, cada uma corrige os erros das anteriores."),
+], columns=["modelo", "familia", "como_funciona"]).set_index("modelo")
 
 
 # --- Métricas ---------------------------------------------------------------------------
@@ -125,8 +73,7 @@ METRICS = {
     "recall": ("Recall: % de churners que foram sinalizados (limiar 0,5)", True),
     "f1": ("F1: média harmónica de precision e recall (limiar 0,5)", True),
 }
-LOWER_IS_BETTER = [m for m, (_, higher) in METRICS.items() if not higher]
-SUMMARY_COLS = ["auc", "auc_std", "pr_auc", "brier"]   # resumo usado nas tabelas de variantes
+SUMMARY_COLS = ["auc", "auc_std", "pr_auc", "brier"]   # resumo usado na tabela de variantes
 
 
 def classification_metrics(y, p, threshold: float = THRESHOLD) -> dict:
@@ -156,19 +103,11 @@ def metrics_glossary() -> pd.DataFrame:
 
 # --- Dados ---------------------------------------------------------------------------
 def load_processed() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
-    """Lê train/test/joined e a configuração da fase 1.
-
-    keep_default_na=False preserva o literal 'None'. City não está em train/test: vem da base
-    unida para a variante com TargetEncoder.
-    """
+    """Lê train/test/joined e a configuração da fase 1 (keep_default_na=False preserva 'None')."""
     read = dict(keep_default_na=False, na_values=[""])
     train = pd.read_csv(DATA_PROCESSED / "train.csv", **read)
     test = pd.read_csv(DATA_PROCESSED / "test.csv", **read)
     joined = pd.read_csv(DATA_PROCESSED / "joined_para_scoring.csv", **read)
-    city = pd.read_csv(DATA_PROCESSED / "telco_merged_full.csv", usecols=["Customer ID", "City"],
-                       **read)
-    train, test = (d.merge(city, on="Customer ID", how="left", validate="one_to_one")
-                   for d in (train, test))
     cfg = joblib.load(ARTIFACTS_DIR / "preprocessing_config.joblib")
     return train, test, joined, cfg
 
@@ -177,15 +116,17 @@ def load_processed() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
 class BusinessRuleScore(ClassifierMixin, BaseEstimator):
     """Regra sem ML: 1 ponto por fator de risco (Month-to-Month, tenure ≤ 12, fibra), de 0 a 3.
 
-    fit() só regista a taxa de churn por nº de pontos, para dar uma probabilidade (Brier, log loss).
+    fit() só regista a taxa de churn por nº de pontos, para dar uma probabilidade.
     """
 
     def points(self, X: pd.DataFrame) -> np.ndarray:
+        """Nº de fatores de risco de cada cliente (0 a 3)."""
         return ((X["Contract"] == "Month-to-Month").astype(int)
                 + (X["Tenure in Months"] <= 12).astype(int)
                 + (X["Internet Type"] == "Fiber Optic").astype(int)).to_numpy()
 
     def fit(self, X: pd.DataFrame, y):
+        """Guarda a taxa de churn observada para cada nº de pontos."""
         y = np.asarray(y)
         rates = pd.Series(y).groupby(self.points(X)).mean()
         self.rate_ = rates.reindex(range(4)).fillna(y.mean()).to_numpy()
@@ -193,39 +134,32 @@ class BusinessRuleScore(ClassifierMixin, BaseEstimator):
         return self
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """P(churn) = taxa de churn do treino com o mesmo nº de pontos."""
         p = self.rate_[self.points(X)]
         return np.column_stack([1 - p, p])
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """Churn previsto (1) quando P(churn) ≥ 0,5."""
         return (self.predict_proba(X)[:, 1] >= THRESHOLD).astype(int)
 
 
 # --- Construção dos modelos ----------------------------------------------------------
-def make_preprocessors(num: list[str], cat: list[str], te: list[str] = ()) -> dict:
-    """Pré-processadores da fase 1 e, opcionalmente, um TargetEncoder (ex.: City).
-
-    O TargetEncoder fica dentro do Pipeline e usa o mesmo StratifiedKFold, para ser reprodutível.
-    """
-    preps = build_preprocessors(num, cat)
-    if te:
-        for p in preps.values():
-            p.transformers.append(("te", TargetEncoder(target_type="binary", cv=CV), list(te)))
-    return preps
-
-
 def _pipeline(prep, clf) -> Pipeline:
+    """Pré-processador e classificador num só Pipeline, ajustado dentro de cada fold."""
     return Pipeline([("prep", clone(prep)), ("clf", clone(clf))])
 
 
-def tune_base_models(X: pd.DataFrame, y: pd.Series, num: list[str], cat: list[str],
-                     n_iter: int = 20) -> tuple[dict, pd.DataFrame]:
-    """RandomizedSearchCV (StratifiedKFold, AUC) para cada modelo base — só no treino."""
-    preps = make_preprocessors(num, cat)
+def tune_base_models(X: pd.DataFrame, y: pd.Series, num: list[str],
+                     cat: list[str]) -> tuple[dict, pd.DataFrame]:
+    """GridSearchCV (5 folds estratificados, ROC AUC) para cada modelo, só no treino.
+
+    Devolve os melhores hiperparâmetros por modelo e uma tabela com o AUC de cada um.
+    """
+    preps = build_preprocessors(num, cat)
     params, rows = {}, []
-    for name, (kind, clf, space) in BASE_MODELS.items():
-        search = RandomizedSearchCV(_pipeline(preps[kind], clf), space, n_iter=n_iter,
-                                    scoring="roc_auc", cv=CV, n_jobs=-1,
-                                    random_state=RANDOM_STATE)
+    for name, (kind, clf, grid) in BASE_MODELS.items():
+        search = GridSearchCV(_pipeline(preps[kind], clf), grid, scoring="roc_auc", cv=CV,
+                              n_jobs=-1)
         search.fit(X, y)
         params[name] = {k.removeprefix("clf__"): v for k, v in search.best_params_.items()}
         rows.append({"modelo": name, "cv_auc": search.best_score_,
@@ -233,28 +167,16 @@ def tune_base_models(X: pd.DataFrame, y: pd.Series, num: list[str], cat: list[st
     return params, pd.DataFrame(rows).set_index("modelo")
 
 
-def build_models(num: list[str], cat: list[str], params: dict, te: list[str] = (),
-                 baseline: bool = True) -> dict:
-    """Linhas de base, modelos afinados e os dois ensembles (membros em ENSEMBLE_MEMBERS).
-
-    O stacking usa previsões out-of-fold (cv=5) para não aprender com o seu próprio treino.
-    """
-    preps = make_preprocessors(num, cat, te)
-    base = {name: _pipeline(preps[kind], clone(clf).set_params(**params.get(name, {})))
-            for name, (kind, clf, _) in BASE_MODELS.items()}
-    members = []
-    for name, short_name in ENSEMBLE_MEMBERS.items():
-        members.append((short_name, clone(base[name])))
-    ensembles = {
-        "Soft Voting": VotingClassifier(members, voting="soft", n_jobs=-1),
-        "Stacking": StackingClassifier(members, final_estimator=LogisticRegression(max_iter=1000),
-                                       cv=CV, stack_method="predict_proba", n_jobs=-1),
-    }
-    first = {}
+def build_models(num: list[str], cat: list[str], params: dict, baseline: bool = True) -> dict:
+    """Modelos com os hiperparâmetros escolhidos e, se baseline=True, as duas linhas de base."""
+    preps = build_preprocessors(num, cat)
+    models = {}
     if baseline:
-        first = {BASELINE: _pipeline(preps["trees"], DummyClassifier(strategy="prior")),
-                 RULE_BASELINE: BusinessRuleScore()}
-    return first | base | ensembles
+        models = {BASELINE: _pipeline(preps["trees"], DummyClassifier(strategy="prior")),
+                  RULE_BASELINE: BusinessRuleScore()}
+    for name, (kind, clf, _) in BASE_MODELS.items():
+        models[name] = _pipeline(preps[kind], clone(clf).set_params(**params.get(name, {})))
+    return models
 
 
 # --- Avaliação em validação cruzada --------------------------------------------------
@@ -275,15 +197,13 @@ def _summary_row(name: str, val_scores: list, train_scores: list) -> dict:
     return row
 
 
-def cv_evaluate(models: dict, X: pd.DataFrame, y: pd.Series, threshold: float = THRESHOLD,
+def cv_evaluate(models: dict, X: pd.DataFrame, y: pd.Series,
                 benchmarks: dict | None = None) -> tuple[pd.DataFrame, dict]:
     """Avalia todos os modelos no mesmo 5-fold estratificado.
 
-    benchmarks: {nome: score em [0, 1]} que não se treinam (ex.: Churn Score IBM / 100),
-    avaliados nos mesmos folds.
-
-    Devolve (table, oof): table tem a média e o desvio-padrão de cada métrica em validação e a
-    média no treino (auc_train - auc = sobreajuste); oof tem as probabilidades out-of-fold.
+    benchmarks: {nome: score em [0, 1]} que não se treinam (o Churn Score IBM / 100).
+    Devolve (tabela, oof): a tabela tem a média e o desvio-padrão de cada métrica em validação
+    e a média no treino (auc_train − auc = sobreajuste); oof tem as P(churn) out-of-fold.
     """
     y = y.reset_index(drop=True)
     X = X.reset_index(drop=True)
@@ -295,15 +215,15 @@ def cv_evaluate(models: dict, X: pd.DataFrame, y: pd.Series, threshold: float = 
         val_scores, train_scores = [], []
         for tr, va, p_tr, p_va in runs:
             p_oof[va] = p_va
-            val_scores.append(classification_metrics(y.iloc[va], p_va, threshold))
-            train_scores.append(classification_metrics(y.iloc[tr], p_tr, threshold))
+            val_scores.append(classification_metrics(y.iloc[va], p_va))
+            train_scores.append(classification_metrics(y.iloc[tr], p_tr))
         rows.append(_summary_row(name, val_scores, train_scores))
         oof[name] = p_oof
     for name, score in (benchmarks or {}).items():
         score = np.asarray(score, dtype=float)
         rows.append(_summary_row(
-            name, [classification_metrics(y.iloc[va], score[va], threshold) for _, va in folds],
-            [classification_metrics(y.iloc[tr], score[tr], threshold) for tr, _ in folds]))
+            name, [classification_metrics(y.iloc[va], score[va]) for _, va in folds],
+            [classification_metrics(y.iloc[tr], score[tr]) for tr, _ in folds]))
         oof[name] = score
     table = pd.DataFrame(rows).set_index("modelo").sort_values("auc", ascending=False)
     return table, oof
@@ -317,41 +237,21 @@ def metrics_view(table: pd.DataFrame, kind: str = "cv") -> pd.DataFrame:
     return out
 
 
-def select_best(table: pd.DataFrame, metric: str = "auc") -> str:
-    """Modelo com melhor valor médio em CV (as referências não são candidatas)."""
-    return table.drop(index=REFERENCES, errors="ignore")[metric].idxmax()
+def select_model(table: pd.DataFrame) -> tuple[str, str]:
+    """Escolhe o modelo final e devolve (nome, justificação).
 
-
-def tied_with_best(table: pd.DataFrame, best: str, metric: str = "auc") -> list[str]:
-    """Modelos a menos de um desvio-padrão (o do melhor, em CV) do melhor: empatados com ele."""
-    t = table.drop(index=REFERENCES, errors="ignore")
-    gap = t.loc[best, metric] - t[metric]
-    return list(t.index[(gap < t.loc[best, f"{metric}_std"]) & (t.index != best)])
-
-
-def select_parsimonious(table: pd.DataFrame, metric: str = "auc") -> tuple[str, pd.DataFrame, str]:
-    """Regra de parcimónia. Devolve (modelo escolhido, tabela da decisão, justificação)."""
-    best = select_best(table, metric)
-    candidates = [best] + tied_with_best(table, best, metric)
-    chosen = min(candidates, key=COMPLEXITY_ORDER.index)
-    decision = table.drop(index=REFERENCES, errors="ignore")[[metric, f"{metric}_std"]].copy()
-    decision["ordem_complexidade"] = [COMPLEXITY_ORDER.index(m) + 1 for m in decision.index]
-    decision["empatado_com_melhor"] = decision.index.isin(candidates)
-    decision["maior_auc"] = decision.index == best
-    decision["escolhido"] = decision.index == chosen
-    if chosen == best:
-        reason = (f"{best} tem o maior {metric.upper()} em CV e é o mais simples entre os "
-                  f"empatados ({', '.join(candidates)}).")
-    else:
-        reason = (f"{best} tem o maior {metric.upper()} em CV, mas {chosen} está empatado "
-                  f"(diferença < 1 desvio-padrão) e é mais simples: escolhe-se {chosen}.")
-    return chosen, decision.sort_values(metric, ascending=False), reason
-
-
-def prediction_correlation(oof: dict, models: list[str] | None = None) -> pd.DataFrame:
-    """Correlação entre as probabilidades OOF dos modelos (diversidade para os ensembles)."""
-    models = models or [m for m in oof if m not in REFERENCES]
-    return pd.DataFrame({m: oof[m] for m in models}).corr()
+    Decidimos escolher o maior ROC AUC em CV. Se a regressão logística ficar a menos de
+    LR_MARGIN do melhor, escolhemos a regressão logística, por ser mais fácil de explicar.
+    """
+    candidates = table.drop(index=REFERENCES, errors="ignore")["auc"]
+    best = candidates.idxmax()
+    gap = candidates[best] - candidates["Logistic Regression"]
+    if best != "Logistic Regression" and gap < LR_MARGIN:
+        return "Logistic Regression", (
+            f"{best} tem o maior AUC em CV, mas a Logistic Regression fica a {gap:.3f} "
+            f"(menos de {LR_MARGIN}) e é mais fácil de explicar.")
+    return best, (f"{best} tem o maior AUC em CV ({candidates[best]:.3f}); a Logistic "
+                  f"Regression fica a {gap:.3f}, acima da margem de {LR_MARGIN}.")
 
 
 def threshold_table(y, p, thresholds=(0.2, 0.3, 0.4, 0.5, 0.6)) -> pd.DataFrame:
@@ -367,67 +267,41 @@ def threshold_table(y, p, thresholds=(0.2, 0.3, 0.4, 0.5, 0.6)) -> pd.DataFrame:
     return pd.DataFrame(rows).set_index("limiar")
 
 
-def best_f1_threshold(y, p) -> float:
-    """Limiar que maximiza o F1 (referência; a escolha final depende dos custos de negócio)."""
-    f1 = threshold_table(y, p, THRESHOLD_GRID)["f1"].to_numpy()
-    return float(THRESHOLD_GRID[int(np.argmax(f1))])
-
-
-def capacity_thresholds(p, shares=(0.10, 0.20)) -> dict:
-    """Limiar de P(churn) que sinaliza exatamente os top x% de clientes (capacidade da equipa)."""
-    p = np.asarray(p, dtype=float)
-    return {share: float(np.quantile(p, 1 - share)) for share in shares}
+def capacity_threshold(p, share: float = CAPACITY_SHARE) -> float:
+    """P(churn) a partir da qual um cliente está no top `share` (capacidade da equipa)."""
+    return float(np.quantile(np.asarray(p, dtype=float), 1 - share))
 
 
 def decision_table(y, p, thresholds: dict) -> pd.DataFrame:
-    """Precision, recall, F1 e % sinalizados para limiares de decisão com nome.
+    """Precision, recall, F1 e % sinalizados para limiares com nome.
 
-    thresholds: {critério: limiar}, ex.: {"0,5": 0.5, "melhor F1": 0.37, "top 10%": 0.81}.
+    thresholds: {critério: limiar}, ex.: {"0,5": 0.5, "top 20%": 0.44}.
     """
     t = threshold_table(y, p, tuple(thresholds.values()))
     t.insert(0, "criterio", list(thresholds))
     return t.reset_index().set_index("criterio")
 
 
-# Nível de risco (absoluto) e prioridade de contacto (relativa à capacidade): README.md, "Métricas".
-RISK_LEVELS = {"médio": 0.30, "alto": 0.60}   # baixo < 30% ≤ médio < 60% ≤ alto
-RISK_ORDER = ["baixo", "médio", "alto"]
-PRIORITY_ORDER = ["top 10%", "top 20%", "fora da capacidade"]
+def in_top_capacity(p, cut: float) -> np.ndarray:
+    """True para os clientes dentro da capacidade de contacto (P(churn) ≥ corte do top 20%)."""
+    return np.asarray(p, dtype=float) >= cut
 
 
-def risk_level(p, cuts: dict = RISK_LEVELS) -> np.ndarray:
-    """Nível de risco absoluto: baixo (< 30%), médio (30–60%) ou alto (≥ 60%)."""
-    p = np.asarray(p, dtype=float)
-    return np.select([p >= cuts["alto"], p >= cuts["médio"]], ["alto", "médio"], default="baixo")
+def calibration_table(y, p) -> pd.DataFrame:
+    """Por faixa de P(churn) (< 30%, 30–60%, ≥ 60%): nº de clientes, P média e churn real.
 
-
-def contact_priority(p, capacity_cuts: dict) -> np.ndarray:
-    """Prioridade de contacto: 'top 10%', 'top 20%' ou fora.
-
-    capacity_cuts: {"top 10%": limiar, "top 20%": limiar}, fixados nas previsões OOF do treino.
+    Se as duas últimas colunas forem parecidas, P(churn) pode ler-se como uma percentagem real.
     """
-    p = np.asarray(p, dtype=float)
-    return np.select([p >= capacity_cuts["top 10%"], p >= capacity_cuts["top 20%"]],
-                     ["top 10%", "top 20%"], default="fora da capacidade")
-
-
-def risk_level_table(y, p, cuts: dict = RISK_LEVELS) -> pd.DataFrame:
-    """Clientes, % da base e taxa de churn observada em cada nível de risco."""
-    t = (pd.DataFrame({"nivel_risco": risk_level(p, cuts), "y": np.asarray(y)})
-         .groupby("nivel_risco")["y"].agg(clientes="size", churn_real="mean")
-         .reindex(RISK_ORDER).fillna(0))
+    faixa = pd.cut(np.asarray(p, dtype=float), bins=[0, 0.3, 0.6, np.inf], right=False,
+                   labels=["< 30%", "30–60%", "≥ 60%"])
+    t = (pd.DataFrame({"faixa_P": faixa, "p": np.asarray(p, dtype=float), "y": np.asarray(y)})
+         .groupby("faixa_P", observed=False)
+         .agg(clientes=("y", "size"), p_media=("p", "mean"), churn_real=("y", "mean")))
     t["pct_base"] = t["clientes"] / t["clientes"].sum()
-    t["p_media"] = pd.Series(np.asarray(p)).groupby(risk_level(p, cuts)).mean().reindex(RISK_ORDER)
     return t
 
 
-# --- Decisões e treino final ----------------------------------------------------------
-def include_city(cv_table: pd.DataFrame, best: str, city_cv: pd.DataFrame) -> tuple[float, bool]:
-    """Ganho de AUC em CV com City; só compensa se passar o desvio-padrão do melhor modelo."""
-    gain = city_cv["auc"].iloc[0] - cv_table.loc[best, "auc"]
-    return gain, bool(gain > cv_table.loc[best, "auc_std"])
-
-
+# --- Treino final e holdout -----------------------------------------------------------
 def fit_predict(models: dict, X_train: pd.DataFrame, y_train, X_test: pd.DataFrame) -> dict:
     """Treina cada modelo no treino completo e devolve P(churn) no teste, por modelo."""
     return {name: m.fit(X_train, y_train).predict_proba(X_test)[:, 1]
@@ -436,60 +310,16 @@ def fit_predict(models: dict, X_train: pd.DataFrame, y_train, X_test: pd.DataFra
 
 def save_bundle(path, model, name: str, features: list[str], target: str, best_params: dict,
                 cv: dict, holdout: dict, **extra) -> None:
-    """Guarda o modelo e o que é preciso para o voltar a usar (joblib).
-
-    Chaves: model, name, features, target, best_params, cv, holdout e as de `extra`
-    (ex.: population). A app e os testes leem este dicionário.
-    """
+    """Guarda o modelo e o que a app e os testes precisam para o usar (dicionário joblib)."""
     joblib.dump({"model": model, "name": name, "features": features, "target": target,
                  "best_params": best_params, "cv": cv, "holdout": holdout, **extra}, path)
 
 
-# --- Avaliação final -------------------------------------------------------------------
 def holdout_report(probas: dict, y: pd.Series, benchmark: pd.Series) -> pd.DataFrame:
     """Nove métricas no holdout para cada modelo e para o Churn Score IBM (0–100 -> 0–1)."""
     rows = {name: classification_metrics(y, p) for name, p in probas.items()}
     rows[BENCHMARK] = classification_metrics(y, benchmark / 100)
     return pd.DataFrame(rows).T.sort_values("auc", ascending=False)
-
-
-def paired_bootstrap_auc_diff(y, p_model, p_reference, n_boot: int = 2000,
-                              random_state: int = RANDOM_STATE, level: float = 0.95) -> dict:
-    """IC por bootstrap emparelhado para AUC(modelo) − AUC(referência).
-
-    As duas AUC calculam-se nos mesmos clientes de cada reamostra; o intervalo é o dos percentis.
-    Se incluir zero, a diferença não se distingue do ruído. Só reporte.
-    """
-    y, a, b = np.asarray(y), np.asarray(p_model, dtype=float), np.asarray(p_reference, dtype=float)
-    rng = np.random.default_rng(random_state)
-    diffs = []
-    for _ in range(n_boot):
-        i = rng.integers(0, len(y), len(y))
-        if y[i].min() == y[i].max():   # reamostra só com uma classe: AUC indefinida
-            continue
-        diffs.append(metrics.roc_auc_score(y[i], a[i]) - metrics.roc_auc_score(y[i], b[i]))
-    diffs = np.array(diffs)
-    tail = (1 - level) / 2
-    low, high = np.quantile(diffs, [tail, 1 - tail])
-    return {"auc_modelo": metrics.roc_auc_score(y, a), "auc_referencia": metrics.roc_auc_score(y, b),
-            "diferenca": metrics.roc_auc_score(y, a) - metrics.roc_auc_score(y, b),
-            "ic_inferior": low, "ic_superior": high, "nivel": level,
-            "reamostras": len(diffs), "pct_reamostras_modelo_melhor": float(np.mean(diffs > 0)),
-            "ic_inclui_zero": bool(low <= 0 <= high), "random_state": random_state}
-
-
-def comparison_table(rows: list) -> pd.DataFrame:
-    """Métricas de vários modelos, cada um no seu conjunto de clientes.
-
-    rows: lista de (modelo, conjunto, y, P(churn)). Só se comparam linhas do mesmo conjunto.
-    """
-    table = []
-    for model_name, subset_name, y, p in rows:
-        row = {"modelo": model_name, "conjunto": subset_name,
-               "clientes": len(y), "taxa_churn": np.mean(y)}
-        row.update(classification_metrics(y, p))
-        table.append(row)
-    return pd.DataFrame(table).set_index(["conjunto", "modelo"])
 
 
 def permutation_ranking(model, X: pd.DataFrame, y) -> pd.Series:
@@ -506,7 +336,7 @@ def permutation_ranking(model, X: pd.DataFrame, y) -> pd.Series:
 # --- Priorização -------------------------------------------------------------------------
 def priority_list(df: pd.DataFrame, proba: np.ndarray, id_col: str = "Customer ID",
                   cltv_col: str = "CLTV") -> pd.DataFrame:
-    """Ordena clientes por perda esperada = P(churn) × CLTV."""
+    """Ordena os clientes por perda esperada = P(churn) × CLTV."""
     out = df[[id_col, cltv_col]].copy()
     out["p_churn"] = proba
     out["perda_esperada"] = out["p_churn"] * out[cltv_col]
@@ -518,7 +348,7 @@ def priority_list(df: pd.DataFrame, proba: np.ndarray, id_col: str = "Customer I
 
 
 def capture_curve(y: pd.Series, cltv: pd.Series, orderings: dict) -> pd.DataFrame:
-    """% do CLTV dos clientes que saíram captado ao contactar os top-k% de cada ordenação."""
+    """% do CLTV dos clientes que saíram apanhado ao contactar os top-k% de cada ordenação."""
     y, cltv = np.asarray(y), np.asarray(cltv, dtype=float)
     lost = cltv * y
     frac = np.arange(1, len(y) + 1) / len(y)

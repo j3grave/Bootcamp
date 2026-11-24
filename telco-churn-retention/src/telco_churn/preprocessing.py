@@ -34,6 +34,7 @@ def build_preprocessors(num: list[str], cat: list[str]) -> dict[str, ColumnTrans
 
 def export_artifacts(train: pd.DataFrame, test: pd.DataFrame, joined: pd.DataFrame,
                      merged: pd.DataFrame, config: dict) -> list:
+    """Grava os CSV da fase 1 e a configuração (joblib) e devolve os caminhos criados."""
     DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     paths = {
